@@ -24,7 +24,7 @@ func NewHandler(bot *tb.Bot, state *State, quiz Quiz) *Handler {
 		bot:       bot,
 		state:     state,
 		quiz:      quiz,
-		blacklist: NewBlacklist(),
+		blacklist: NewBlacklist("blacklist.json"), // ✅ теперь с файлом
 	}
 	h.Btns.Student, h.Btns.Guest, h.Btns.Ads = StudentButton(), GuestButton(), AdsButton()
 	return h
@@ -38,6 +38,8 @@ func (h *Handler) Register() {
 	h.registerQuizHandlers()
 
 	h.bot.Handle("/ban", h.handleBan)
+	h.bot.Handle("/unban", h.handleUnban)
+	h.bot.Handle("/listban", h.handleListBan)
 	h.bot.Handle(tb.OnText, h.filterMessage)
 }
 
@@ -83,10 +85,28 @@ func (h *Handler) deleteAfter(m *tb.Message, d time.Duration) {
 	}()
 }
 
-func (h *Handler) setUserRestriction(chat *tb.Chat, user *tb.User, canSend bool) {
+func (h *Handler) setUserRestriction(chat *tb.Chat, user *tb.User, allowAll bool) {
+	var rights tb.Rights
+	if allowAll {
+		rights = tb.Rights{
+			CanSendMessages:   true,
+			CanSendAudios:     true,
+			CanSendDocuments:  true,
+			CanSendPhotos:     true,
+			CanSendVideos:     true,
+			CanSendVideoNotes: true,
+			CanSendVoiceNotes: true,
+			CanSendPolls:      true,
+		}
+	} else {
+		rights = tb.Rights{
+			CanSendMessages: false,
+		}
+	}
+
 	if err := h.bot.Restrict(chat, &tb.ChatMember{
 		User:   user,
-		Rights: tb.Rights{CanSendMessages: canSend},
+		Rights: rights,
 	}); err != nil {
 		log.Println("Restrict error:", err)
 	}
@@ -180,7 +200,7 @@ func (h *Handler) createQuizHandler(i int, q Question, btn tb.InlineButton) func
 			msg := h.sendOrEdit(c.Chat(), c.Message(), "✅ Верификация пройдена! Теперь можно писать в чат.", nil)
 			h.deleteAfter(msg, 3*time.Second)
 		} else {
-			msg := h.sendOrEdit(c.Chat(), c.Message(), "❌ Не удалось подтвердить статус студента(ки).", nil)
+			msg := h.sendOrEdit(c.Chat(), c.Message(), "❌ Не удалось подтвердить статус студента.", nil)
 			h.deleteAfter(msg, 5*time.Second)
 		}
 		h.state.Reset(userID)
@@ -193,14 +213,62 @@ func (h *Handler) handleBan(c tb.Context) error {
 	if c.Message() == nil || c.Sender() == nil {
 		return nil
 	}
+
+	member, err := h.bot.ChatMemberOf(c.Chat(), c.Sender())
+	if err != nil {
+		return c.Reply("❌ Не удалось проверить права: " + err.Error())
+	}
+	if member.Role != tb.Administrator && member.Role != tb.Creator {
+		return c.Reply("⛔ Команда /ban доступна только администрации.")
+	}
+
 	args := strings.Fields(c.Message().Text)
 	if len(args) < 2 {
-		_, _ = h.bot.Send(c.Chat(), "Используй: /ban слово1 [слово2 ...]")
+		return c.Reply("💡 Используй: /ban слово1 [слово2 ...]")
+	}
+
+	h.blacklist.AddPhrase(args[1:])
+	return c.Reply("✅ Добавлено запрещённое словосочетание: " + strings.Join(args[1:], " "))
+}
+
+func (h *Handler) handleUnban(c tb.Context) error {
+	if c.Message() == nil || c.Sender() == nil {
 		return nil
 	}
-	h.blacklist.AddPhrase(args[1:])
-	_, _ = h.bot.Send(c.Chat(), "✅ Добавлено запрещённое словосочетание: "+strings.Join(args[1:], " "))
-	return nil
+
+	member, err := h.bot.ChatMemberOf(c.Chat(), c.Sender())
+	if err != nil {
+		return c.Reply("❌ Не удалось проверить права: " + err.Error())
+	}
+	if member.Role != tb.Administrator && member.Role != tb.Creator {
+		return c.Reply("⛔ Команда /unban доступна только администрации.")
+	}
+
+	args := strings.Fields(c.Message().Text)
+	if len(args) < 2 {
+		return c.Reply("💡 Используй: /unban слово1 [слово2 ...]")
+	}
+
+	ok := h.blacklist.RemovePhrase(args[1:])
+	if ok {
+		return c.Reply("✅ Удалено запрещённое словосочетание: " + strings.Join(args[1:], " "))
+	}
+	return c.Reply("❌ Такого словосочетания нет в списке.")
+}
+
+func (h *Handler) handleListBan(c tb.Context) error {
+	phrases := h.blacklist.List()
+	if len(phrases) == 0 {
+		return c.Reply("📭 Список пуст.")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🚫 Запрещённые словосочетания:\n")
+	for i, p := range phrases {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, strings.Join(p, " ")))
+	}
+
+	return c.Reply(sb.String())
 }
 
 func (h *Handler) filterMessage(c tb.Context) error {
@@ -210,7 +278,6 @@ func (h *Handler) filterMessage(c tb.Context) error {
 	}
 	if h.blacklist.CheckMessage(msg.Text) {
 		_ = h.bot.Delete(msg)
-		return nil
 	}
 	return nil
 }
