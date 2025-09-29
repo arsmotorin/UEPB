@@ -24,7 +24,7 @@ func NewHandler(bot *tb.Bot, state *State, quiz Quiz) *Handler {
 		bot:       bot,
 		state:     state,
 		quiz:      quiz,
-		blacklist: NewBlacklist("blacklist.json"), // ✅ теперь с файлом
+		blacklist: NewBlacklist("blacklist.json"),
 	}
 	h.Btns.Student, h.Btns.Guest, h.Btns.Ads = StudentButton(), GuestButton(), AdsButton()
 	return h
@@ -80,7 +80,7 @@ func (h *Handler) deleteAfter(m *tb.Message, d time.Duration) {
 	go func() {
 		time.Sleep(d)
 		if err := h.bot.Delete(m); err != nil {
-			log.Println("Delete error:", err)
+			log.Printf("[ERROR] Failed to delete message %d: %v", m.ID, err)
 		}
 	}()
 }
@@ -314,14 +314,19 @@ func (h *Handler) filterMessage(c tb.Context) error {
 	}
 
 	// Don't filter admin messages
-	if msg.Sender.ID == h.bot.Me.ID {
+	member, err := h.bot.ChatMemberOf(c.Chat(), msg.Sender)
+	if err == nil && (member.Role == tb.Administrator || member.Role == tb.Creator) {
 		return nil
 	}
 
 	log.Printf("[DEBUG] Checking message from user %d: '%s'", msg.Sender.ID, msg.Text)
 
 	if h.blacklist.CheckMessage(msg.Text) {
-		_ = h.bot.Delete(msg)
+		if err := h.bot.Delete(msg); err != nil {
+			log.Printf("[ERROR] Failed to delete message %d from %d: %v", msg.ID, msg.Sender.ID, err)
+		} else {
+			log.Printf("[DEBUG] Deleted message %d from %d", msg.ID, msg.Sender.ID)
+		}
 	}
 	return nil
 }
