@@ -1,0 +1,4 @@
+github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
+github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
+gopkg.in/telebot.v4 v4.0.0-beta.5 h1:uhOnORHch59vfhy09WrHLsDTwl6UIM38fiZ62jzC3dk=
+gopkg.in/telebot.v4 v4.0.0-beta.5/go.mod h1:jhcQjM/176jZm/s9Up/MzV5VFGPjyI8oiJhWvCMxayI=
