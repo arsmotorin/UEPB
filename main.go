@@ -1,10 +1,11 @@
 package main
 
 import (
-	"UEPB/config"
 	"log"
+	"os"
 	"time"
 
+	"github.com/joho/godotenv"
 	tb "gopkg.in/telebot.v4"
 )
 
@@ -12,8 +13,14 @@ import (
 func main() {
 	log.Println("Bot is starting...")
 
-	cfg := config.Load()
-	bot, err := tb.NewBot(tb.Settings{Token: cfg.BotToken, Poller: &tb.LongPoller{Timeout: 10 * time.Second}})
+	// Load .env file
+	godotenv.Load()
+	token := os.Getenv("BOT_TOKEN")
+	if token == "" {
+		log.Fatal("BOT_TOKEN is required in .env file")
+	}
+
+	bot, err := tb.NewBot(tb.Settings{Token: token, Poller: &tb.LongPoller{Timeout: 10 * time.Second}})
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -15,6 +15,9 @@ type Blacklist struct {
 }
 
 func NewBlacklist(file string) *Blacklist {
+	// Create data dir
+	os.MkdirAll("data", 0755)
+
 	bl := &Blacklist{file: file}
 	bl.load()
 	return bl

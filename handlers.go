@@ -37,9 +37,9 @@ func (h *Handler) Register() {
 	h.bot.Handle(&h.Btns.Ads, h.onlyNewbies(h.handleAds))
 	h.registerQuizHandlers()
 
-	h.bot.Handle("/ban", h.handleBan)
-	h.bot.Handle("/unban", h.handleUnban)
-	h.bot.Handle("/listban", h.handleListBan)
+	h.bot.Handle("/banword", h.handleBan)
+	h.bot.Handle("/unbanword", h.handleUnban)
+	h.bot.Handle("/listbanword", h.handleListBan)
 	h.bot.Handle(tb.OnText, h.filterMessage)
 }
 
@@ -219,12 +219,12 @@ func (h *Handler) handleBan(c tb.Context) error {
 		return c.Reply("❌ Не удалось проверить права: " + err.Error())
 	}
 	if member.Role != tb.Administrator && member.Role != tb.Creator {
-		return c.Reply("⛔ Команда /ban доступна только администрации.")
+		return c.Reply("⛔ Команда /banword доступна только администрации.")
 	}
 
 	args := strings.Fields(c.Message().Text)
 	if len(args) < 2 {
-		return c.Reply("💡 Используй: /ban слово1 [слово2 ...]")
+		return c.Reply("💡 Используй: /banword слово1 [слово2 ...]")
 	}
 
 	h.blacklist.AddPhrase(args[1:])
@@ -241,12 +241,12 @@ func (h *Handler) handleUnban(c tb.Context) error {
 		return c.Reply("❌ Не удалось проверить права: " + err.Error())
 	}
 	if member.Role != tb.Administrator && member.Role != tb.Creator {
-		return c.Reply("⛔ Команда /unban доступна только администрации.")
+		return c.Reply("⛔ Команда /unbanword доступна только администрации.")
 	}
 
 	args := strings.Fields(c.Message().Text)
 	if len(args) < 2 {
-		return c.Reply("💡 Используй: /unban слово1 [слово2 ...]")
+		return c.Reply("💡 Используй: /unbanword слово1 [слово2 ...]")
 	}
 
 	ok := h.blacklist.RemovePhrase(args[1:])
