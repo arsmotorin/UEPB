@@ -43,6 +43,7 @@ func (h *Handler) Register() {
 	h.bot.Handle("/banword", h.handleBan)
 	h.bot.Handle("/unbanword", h.handleUnban)
 	h.bot.Handle("/listbanword", h.handleListBan)
+	h.bot.Handle("/ping", h.handlePing)
 	h.bot.Handle(tb.OnText, h.filterMessage)
 
 	// Set bot commands for better UX
@@ -51,6 +52,7 @@ func (h *Handler) Register() {
 
 func (h *Handler) setBotCommands() {
 	commands := []tb.Command{
+		{Text: "ping", Description: "Проверить отклик бота"},
 		{Text: "banword", Description: "Добавить запрещённое слово"},
 		{Text: "unbanword", Description: "Удалить запрещённое слово"},
 		{Text: "listbanword", Description: "Показать список запрещённых слов"},
@@ -247,6 +249,30 @@ func (h *Handler) handleAds(c tb.Context) error {
 	return nil
 }
 
+func (h *Handler) handlePing(c tb.Context) error {
+	start := time.Now()
+
+	// Send the response and measure time
+	msg, err := h.bot.Send(c.Chat(), "🏓 Понг!")
+	if err != nil {
+		log.Printf("[ERROR] Failed to send ping response: %v", err)
+		return err
+	}
+
+	// Calculate response time
+	responseTime := time.Since(start)
+	responseMs := int(responseTime.Nanoseconds() / 1000000) // Convert to milliseconds
+
+	// Edit the message with response time
+	finalText := fmt.Sprintf("🏓 Понг! (%d мс)", responseMs)
+	_, err = h.bot.Edit(msg, finalText)
+	if err != nil {
+		log.Printf("[ERROR] Failed to edit ping message: %v", err)
+	}
+
+	return nil
+}
+
 // Quiz
 func (h *Handler) registerQuizHandlers() {
 	for i, q := range h.quiz.Questions {
@@ -434,6 +460,11 @@ func (h *Handler) handleListBan(c tb.Context) error {
 func (h *Handler) filterMessage(c tb.Context) error {
 	msg := c.Message()
 	if msg == nil || msg.Sender == nil {
+		return nil
+	}
+
+	// Don't filter commands
+	if strings.HasPrefix(msg.Text, "/") {
 		return nil
 	}
 
