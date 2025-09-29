@@ -10,21 +10,23 @@ import (
 )
 
 type Handler struct {
-	bot       *tb.Bot
-	state     *State
-	quiz      Quiz
-	blacklist *Blacklist
-	Btns      struct {
+	bot         *tb.Bot
+	state       *State
+	quiz        Quiz
+	blacklist   *Blacklist
+	adminChatID int64
+	Btns        struct {
 		Student, Guest, Ads tb.InlineButton
 	}
 }
 
-func NewHandler(bot *tb.Bot, state *State, quiz Quiz) *Handler {
+func NewHandler(bot *tb.Bot, state *State, quiz Quiz, adminChatID int64) *Handler {
 	h := &Handler{
-		bot:       bot,
-		state:     state,
-		quiz:      quiz,
-		blacklist: NewBlacklist("blacklist.json"),
+		bot:         bot,
+		state:       state,
+		quiz:        quiz,
+		blacklist:   NewBlacklist("blacklist.json"),
+		adminChatID: adminChatID,
 	}
 	h.Btns.Student, h.Btns.Guest, h.Btns.Ads = StudentButton(), GuestButton(), AdsButton()
 	return h
@@ -32,6 +34,7 @@ func NewHandler(bot *tb.Bot, state *State, quiz Quiz) *Handler {
 
 func (h *Handler) Register() {
 	h.bot.Handle(tb.OnUserJoined, h.handleUserJoined)
+	h.bot.Handle(tb.OnUserLeft, h.handleUserLeft)
 	h.bot.Handle(&h.Btns.Student, h.onlyNewbies(h.handleStudent))
 	h.bot.Handle(&h.Btns.Guest, h.onlyNewbies(h.handleGuest))
 	h.bot.Handle(&h.Btns.Ads, h.onlyNewbies(h.handleAds))
@@ -41,6 +44,28 @@ func (h *Handler) Register() {
 	h.bot.Handle("/unbanword", h.handleUnban)
 	h.bot.Handle("/listbanword", h.handleListBan)
 	h.bot.Handle(tb.OnText, h.filterMessage)
+
+	// Set bot commands for better UX
+	h.setBotCommands()
+}
+
+func (h *Handler) setBotCommands() {
+	commands := []tb.Command{
+		{Text: "banword", Description: "Добавить запрещённое слово"},
+		{Text: "unbanword", Description: "Удалить запрещённое слово"},
+		{Text: "listbanword", Description: "Показать список запрещённых слов"},
+	}
+
+	if err := h.bot.SetCommands(commands); err != nil {
+		log.Printf("[ERROR] Failed to set bot commands: %v", err)
+	}
+}
+
+func (h *Handler) logToAdmin(message string) {
+	adminChat := &tb.Chat{ID: h.adminChatID}
+	if _, err := h.bot.Send(adminChat, message); err != nil {
+		log.Printf("[ERROR] Failed to send admin log: %v", err)
+	}
 }
 
 func (h *Handler) onlyNewbies(handler func(tb.Context) error) func(tb.Context) error {
@@ -126,6 +151,17 @@ func getNewUsers(msg *tb.Message) []*tb.User {
 	return nil
 }
 
+func (h *Handler) getUserDisplayName(user *tb.User) string {
+	if user.Username != "" {
+		return "@" + user.Username
+	}
+	name := user.FirstName
+	if user.LastName != "" {
+		name += " " + user.LastName
+	}
+	return name + fmt.Sprintf(" (ID: %d)", user.ID)
+}
+
 // Handlers
 func (h *Handler) handleUserJoined(c tb.Context) error {
 	if c.Message() == nil || c.Chat() == nil {
@@ -147,7 +183,36 @@ func (h *Handler) handleUserJoined(c tb.Context) error {
 		msg := h.sendOrEdit(c.Chat(), nil, text, keyboard)
 		h.deleteAfter(msg, 2*time.Minute)
 		h.state.InitUser(int(u.ID))
+
+		// Log to admin chat
+		logMsg := fmt.Sprintf("👤 Новый участник вошёл в чат\n\n"+
+			"Пользователь: %s\n"+
+			"Чат: %s (ID: %d)",
+			h.getUserDisplayName(u),
+			c.Chat().Title,
+			c.Chat().ID)
+		h.logToAdmin(logMsg)
 	}
+	return nil
+}
+
+func (h *Handler) handleUserLeft(c tb.Context) error {
+	if c.Message() == nil || c.Chat() == nil || c.Message().UserLeft == nil {
+		return nil
+	}
+
+	user := c.Message().UserLeft
+	h.state.ClearNewbie(int(user.ID))
+
+	// Log to admin chat
+	logMsg := fmt.Sprintf("👋 Участник покинул чат\n\n"+
+		"Пользователь: %s\n"+
+		"Чат: %s (ID: %d)",
+		h.getUserDisplayName(user),
+		c.Chat().Title,
+		c.Chat().ID)
+	h.logToAdmin(logMsg)
+
 	return nil
 }
 
@@ -169,6 +234,16 @@ func (h *Handler) handleGuest(c tb.Context) error {
 func (h *Handler) handleAds(c tb.Context) error {
 	msg := h.sendOrEdit(c.Chat(), c.Message(), "📢 Мы открыты к рекламе.\n\nНапиши @chathlp и опиши, что хочешь предложить.", nil)
 	h.deleteAfter(msg, 10*time.Second)
+
+	// Log to admin chat
+	logMsg := fmt.Sprintf("📢 Пользователь выбрал рекламу\n\n"+
+		"Пользователь: %s\n"+
+		"Чат: %s (ID: %d)",
+		h.getUserDisplayName(c.Sender()),
+		c.Chat().Title,
+		c.Chat().ID)
+	h.logToAdmin(logMsg)
+
 	return nil
 }
 
@@ -199,9 +274,33 @@ func (h *Handler) createQuizHandler(i int, q Question, btn tb.InlineButton) func
 			h.state.ClearNewbie(userID)
 			msg := h.sendOrEdit(c.Chat(), c.Message(), "✅ Верификация пройдена! Теперь можно писать в чат.", nil)
 			h.deleteAfter(msg, 3*time.Second)
+
+			// Log successful verification to admin chat
+			logMsg := fmt.Sprintf("✅ Пользователь успешно прошёл верификацию\n\n"+
+				"Пользователь: %s\n"+
+				"Правильных ответов: %d/%d\n"+
+				"Чат: %s (ID: %d)",
+				h.getUserDisplayName(c.Sender()),
+				h.state.TotalCorrect(userID),
+				len(h.quiz.Questions),
+				c.Chat().Title,
+				c.Chat().ID)
+			h.logToAdmin(logMsg)
 		} else {
 			msg := h.sendOrEdit(c.Chat(), c.Message(), "❌ Не удалось подтвердить статус студента.", nil)
 			h.deleteAfter(msg, 5*time.Second)
+
+			// Log failed verification to admin chat
+			logMsg := fmt.Sprintf("❌ Пользователь не прошёл верификацию\n\n"+
+				"Пользователь: %s\n"+
+				"Правильных ответов: %d/%d\n"+
+				"Чат: %s (ID: %d)",
+				h.getUserDisplayName(c.Sender()),
+				h.state.TotalCorrect(userID),
+				len(h.quiz.Questions),
+				c.Chat().Title,
+				c.Chat().ID)
+			h.logToAdmin(logMsg)
 		}
 		h.state.Reset(userID)
 		return nil
@@ -244,6 +343,18 @@ func (h *Handler) handleBan(c tb.Context) error {
 
 	msg, _ := h.bot.Send(c.Chat(), "✅ Добавлено запрещённое словосочетание: "+strings.Join(args[1:], " "))
 	h.deleteAfter(msg, 10*time.Second)
+
+	// Log to admin chat
+	logMsg := fmt.Sprintf("🚫 Добавлено запрещённое слово\n\n"+
+		"Админ: %s\n"+
+		"Запрещённые слова: `%s`\n"+
+		"Чат: %s (ID: %d)",
+		h.getUserDisplayName(c.Sender()),
+		strings.Join(args[1:], " "),
+		c.Chat().Title,
+		c.Chat().ID)
+	h.logToAdmin(logMsg)
+
 	return nil
 }
 
@@ -279,6 +390,17 @@ func (h *Handler) handleUnban(c tb.Context) error {
 	if ok {
 		text = "✅ Удалено запрещённое словосочетание: " + strings.Join(args[1:], " ")
 		log.Printf("[DEBUG] Removed blacklist phrase: %v", args[1:])
+
+		// Log to admin chat
+		logMsg := fmt.Sprintf("✅ Удалено запрещённое слово\n\n"+
+			"Админ: %s\n"+
+			"Удалённые слова: `%s`\n"+
+			"Чат: %s (ID: %d)",
+			h.getUserDisplayName(c.Sender()),
+			strings.Join(args[1:], " "),
+			c.Chat().Title,
+			c.Chat().ID)
+		h.logToAdmin(logMsg)
 	} else {
 		text = "❌ Такого словосочетания нет в списке."
 		log.Printf("[DEBUG] Phrase not found in blacklist: %v", args[1:])
@@ -289,21 +411,23 @@ func (h *Handler) handleUnban(c tb.Context) error {
 }
 
 func (h *Handler) handleListBan(c tb.Context) error {
+	if c.Chat().Type != tb.ChatPrivate || c.Chat().ID != h.adminChatID {
+		return nil
+	}
+
 	phrases := h.blacklist.List()
 	if len(phrases) == 0 {
-		msg, _ := h.bot.Send(c.Chat(), "📭 Список пуст.")
-		h.deleteAfter(msg, 10*time.Second)
+		h.bot.Send(c.Chat(), "📭 Список пуст.")
 		return nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString("🚫 Запрещённые словосочетания:\n")
+	sb.WriteString("🚫 Запрещённые словосочетания:\n\n")
 	for i, p := range phrases {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, strings.Join(p, " ")))
+		sb.WriteString(fmt.Sprintf("%d. `%s`\n", i+1, strings.Join(p, " ")))
 	}
 
-	msg, _ := h.bot.Send(c.Chat(), sb.String())
-	h.deleteAfter(msg, 10*time.Second)
+	h.bot.Send(c.Chat(), sb.String(), tb.ModeMarkdown)
 	return nil
 }
 
