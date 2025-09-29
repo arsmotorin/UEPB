@@ -238,28 +238,41 @@ func (h *Handler) handleUnban(c tb.Context) error {
 
 	member, err := h.bot.ChatMemberOf(c.Chat(), c.Sender())
 	if err != nil {
-		return c.Reply("❌ Не удалось проверить права: " + err.Error())
+		msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось проверить права: "+err.Error())
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
 	}
 	if member.Role != tb.Administrator && member.Role != tb.Creator {
-		return c.Reply("⛔ Команда /unbanword доступна только администрации.")
+		msg, _ := h.bot.Send(c.Chat(), "⛔ Команда /unbanword доступна только администрации.")
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
 	}
 
 	args := strings.Fields(c.Message().Text)
 	if len(args) < 2 {
-		return c.Reply("💡 Используй: /unbanword слово1 [слово2 ...]")
+		msg, _ := h.bot.Send(c.Chat(), "💡 Используй: /unbanword слово1 [слово2 ...]")
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
 	}
 
 	ok := h.blacklist.RemovePhrase(args[1:])
+	var text string
 	if ok {
-		return c.Reply("✅ Удалено запрещённое словосочетание: " + strings.Join(args[1:], " "))
+		text = "✅ Удалено запрещённое словосочетание: " + strings.Join(args[1:], " ")
+	} else {
+		text = "❌ Такого словосочетания нет в списке."
 	}
-	return c.Reply("❌ Такого словосочетания нет в списке.")
+	msg, _ := h.bot.Send(c.Chat(), text)
+	h.deleteAfter(msg, 10*time.Second)
+	return nil
 }
 
 func (h *Handler) handleListBan(c tb.Context) error {
 	phrases := h.blacklist.List()
 	if len(phrases) == 0 {
-		return c.Reply("📭 Список пуст.")
+		msg, _ := h.bot.Send(c.Chat(), "📭 Список пуст.")
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
 	}
 
 	var sb strings.Builder
@@ -268,7 +281,9 @@ func (h *Handler) handleListBan(c tb.Context) error {
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, strings.Join(p, " ")))
 	}
 
-	return c.Reply(sb.String())
+	msg, _ := h.bot.Send(c.Chat(), sb.String())
+	h.deleteAfter(msg, 10*time.Second)
+	return nil
 }
 
 func (h *Handler) filterMessage(c tb.Context) error {
