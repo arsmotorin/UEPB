@@ -118,6 +118,10 @@ func (fh *FeatureHandler) HandleUserJoined(c tb.Context) error {
 	if c.Message() == nil || c.Chat() == nil {
 		return nil
 	}
+	if reg, ok := fh.adminHandler.(interface{ RegisterGroup(*tb.Chat) }); ok {
+		reg.RegisterGroup(c.Chat())
+	}
+
 	users := GetNewUsers(c.Message())
 	keyboard := &tb.ReplyMarkup{
 		InlineKeyboard: [][]tb.InlineButton{{fh.Btns.Student}, {fh.Btns.Guest}, {fh.Btns.Ads}},
@@ -135,13 +139,9 @@ func (fh *FeatureHandler) HandleUserJoined(c tb.Context) error {
 		fh.adminHandler.DeleteAfter(msg, 5*time.Minute)
 		fh.state.InitUser(int(u.ID))
 
-		// Log to admin chat
-		logMsg := fmt.Sprintf("👤 Новый участник вошёл в чат\n\n"+
-			"Пользователь: %s\n"+
-			"Чат: %s (ID: %d)",
-			fh.adminHandler.GetUserDisplayName(u),
-			c.Chat().Title,
-			c.Chat().ID)
+		logMsg := fmt.Sprintf("👤 Новый участник вошёл в чат.\n\n"+
+			"Пользователь: %s",
+			fh.adminHandler.GetUserDisplayName(u))
 		fh.adminHandler.LogToAdmin(logMsg)
 	}
 	return nil
@@ -160,12 +160,9 @@ func (fh *FeatureHandler) HandleUserLeft(c tb.Context) error {
 	fh.adminHandler.ClearViolations(user.ID)
 
 	// Log to admin chat
-	logMsg := fmt.Sprintf("👋 Участник покинул чат\n\n"+
-		"Пользователь: %s\n"+
-		"Чат: %s (ID: %d)",
-		fh.adminHandler.GetUserDisplayName(user),
-		c.Chat().Title,
-		c.Chat().ID)
+	logMsg := fmt.Sprintf("👋 Участник покинул чат.\n\n"+
+		"Пользователь: %s",
+		fh.adminHandler.GetUserDisplayName(user))
 	fh.adminHandler.LogToAdmin(logMsg)
 
 	return nil
@@ -197,12 +194,9 @@ func (fh *FeatureHandler) HandleAds(c tb.Context) error {
 	fh.adminHandler.DeleteAfter(msg, 10*time.Second)
 
 	// Log to admin chat
-	logMsg := fmt.Sprintf("📢 Пользователь выбрал рекламу\n\n"+
-		"Пользователь: %s\n"+
-		"Чат: %s (ID: %d)",
-		fh.adminHandler.GetUserDisplayName(c.Sender()),
-		c.Chat().Title,
-		c.Chat().ID)
+	logMsg := fmt.Sprintf("📢 Пользователь выбрал рекламу.\n\n"+
+		"Пользователь: %s",
+		fh.adminHandler.GetUserDisplayName(c.Sender()))
 	fh.adminHandler.LogToAdmin(logMsg)
 
 	return nil
@@ -267,30 +261,24 @@ func (fh *FeatureHandler) CreateQuizHandler(i int, q interfaces.QuestionInterfac
 			fh.adminHandler.DeleteAfter(msg, 3*time.Second)
 
 			// Log successful verification to admin chat
-			logMsg := fmt.Sprintf("✅ Пользователь успешно прошёл верификацию\n\n"+
+			logMsg := fmt.Sprintf("✅ Пользователь успешно прошёл верификацию.\n\n"+
 				"Пользователь: %s\n"+
-				"Правильных ответов: %d/%d\n"+
-				"Чат: %s (ID: %d)",
+				"Правильных ответов: %d/%d",
 				fh.adminHandler.GetUserDisplayName(c.Sender()),
 				totalCorrect,
-				totalQuestions,
-				c.Chat().Title,
-				c.Chat().ID)
+				totalQuestions)
 			fh.adminHandler.LogToAdmin(logMsg)
 		} else {
 			msg := fh.SendOrEdit(c.Chat(), c.Message(), "❌ Не удалось подтвердить статус студента.", nil)
 			fh.adminHandler.DeleteAfter(msg, 5*time.Second)
 
 			// Log failed verification to admin chat
-			logMsg := fmt.Sprintf("❌ Пользователь не прошёл верификацию\n\n"+
+			logMsg := fmt.Sprintf("❌ Пользователь не прошёл верификацию.\n\n"+
 				"Пользователь: %s\n"+
-				"Правильных ответов: %d/%d\n"+
-				"Чат: %s (ID: %d)",
+				"Правильных ответов: %d/%d",
 				fh.adminHandler.GetUserDisplayName(c.Sender()),
 				totalCorrect,
-				totalQuestions,
-				c.Chat().Title,
-				c.Chat().ID)
+				totalQuestions)
 			fh.adminHandler.LogToAdmin(logMsg)
 		}
 		fh.state.Reset(userID)
@@ -343,14 +331,11 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 				fh.adminHandler.ClearViolations(msg.Sender.ID)
 
 				// Log to admin chat
-				logMsg := fmt.Sprintf("🔨 Автоматический бан за банворды\n\n"+
+				logMsg := fmt.Sprintf("🔨 Выдан бан за спам.\n\n"+
 					"Забанен: %s\n"+
-					"Количество нарушений: %d\n"+
-					"Чат: %s (ID: %d)",
+					"Количество нарушений: %d",
 					fh.adminHandler.GetUserDisplayName(msg.Sender),
-					violationCount,
-					c.Chat().Title,
-					c.Chat().ID)
+					violationCount)
 				fh.adminHandler.LogToAdmin(logMsg)
 			}
 		} else {
@@ -359,16 +344,13 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 			fh.adminHandler.DeleteAfter(warningMsg, 15*time.Second)
 
 			// Log to admin chat
-			logMsg := fmt.Sprintf("⚠️ Обнаружено нарушение\n\n"+
+			logMsg := fmt.Sprintf("⚠️ Обнаружено нарушение.\n\n"+
 				"Пользователь: %s\n"+
 				"Нарушение: #%d\n"+
-				"Сообщение: `%s`\n"+
-				"Чат: %s (ID: %d)",
+				"Сообщение: `%s`",
 				fh.adminHandler.GetUserDisplayName(msg.Sender),
 				violationCount,
-				msg.Text,
-				c.Chat().Title,
-				c.Chat().ID)
+				msg.Text)
 			fh.adminHandler.LogToAdmin(logMsg)
 		}
 	}

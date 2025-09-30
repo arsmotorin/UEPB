@@ -24,6 +24,8 @@ type AdminHandler struct {
 	violations     map[int64]int
 	violationsMu   sync.RWMutex
 	violationsFile string
+	groupIDs       map[int64]struct{}
+	groupMu        sync.RWMutex
 }
 
 // NewAdminHandler creates a new admin handler
@@ -47,6 +49,7 @@ func NewAdminHandler(bot *tb.Bot, blacklist interfaces.BlacklistInterface, admin
 		adminChatID:    adminChatID,
 		violations:     violations,
 		violationsFile: file,
+		groupIDs:       make(map[int64]struct{}),
 	}
 
 	ah.loadViolations()
@@ -240,6 +243,35 @@ func (ah *AdminHandler) HandleListBan(c tb.Context) error {
 	return nil
 }
 
+// RegisterGroup registers a group chat ID
+func (ah *AdminHandler) RegisterGroup(chat *tb.Chat) {
+	if chat == nil || chat.Type == tb.ChatPrivate {
+		return
+	}
+	ah.groupMu.Lock()
+	defer ah.groupMu.Unlock()
+	ah.groupIDs[chat.ID] = struct{}{}
+}
+
+// AllGroupIDs returns all registered group chat IDs
+func (ah *AdminHandler) AllGroupIDs() []int64 {
+	ah.groupMu.RLock()
+	defer ah.groupMu.RUnlock()
+	ids := make([]int64, 0, len(ah.groupIDs))
+	for id := range ah.groupIDs {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// BanUserEverywhere bans a user from all group chats
+func (ah *AdminHandler) BanUserEverywhere(user *tb.User) {
+	for _, chatID := range ah.AllGroupIDs() {
+		chat := &tb.Chat{ID: chatID}
+		_ = ah.BanUser(chat, user)
+	}
+}
+
 // HandleSpamBan handles /spamban command
 func (ah *AdminHandler) HandleSpamBan(c tb.Context) error {
 	if c.Message() == nil || c.Sender() == nil {
@@ -304,27 +336,18 @@ func (ah *AdminHandler) HandleSpamBan(c tb.Context) error {
 		return nil
 	}
 
-	if err := ah.BanUser(c.Chat(), targetUser); err != nil {
-		log.Printf("[ERROR] Failed to ban user %d: %v", targetUser.ID, err)
-		msg, _ := ah.bot.Send(c.Chat(), "❌ Не удалось забанить пользователя: "+err.Error())
-		ah.DeleteAfter(msg, 10*time.Second)
-		return nil
-	}
-
+	ah.BanUserEverywhere(targetUser)
 	ah.ClearViolations(targetUser.ID)
 
 	msg, _ := ah.bot.Send(c.Chat(), fmt.Sprintf("🔨 Пользователь %s забанен за спам.", ah.GetUserDisplayName(targetUser)))
 	ah.DeleteAfter(msg, 10*time.Second)
 
 	// Log to admin chat
-	logMsg := fmt.Sprintf("🔨 Пользователь забанен за спам\n\n"+
+	logMsg := fmt.Sprintf("🔨 Пользователь забанен за спам.\n\n"+
 		"Забанен: %s\n"+
-		"Админ: %s\n"+
-		"Чат: %s (ID: %d)",
+		"Админ: %s",
 		ah.GetUserDisplayName(targetUser),
-		ah.GetUserDisplayName(c.Sender()),
-		c.Chat().Title,
-		c.Chat().ID)
+		ah.GetUserDisplayName(c.Sender()))
 	ah.LogToAdmin(logMsg)
 
 	return nil
