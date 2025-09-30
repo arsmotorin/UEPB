@@ -18,6 +18,11 @@ func NewBlacklist(file string) *Blacklist {
 	// Create data dir
 	os.MkdirAll("data", 0755)
 
+	// Ensure file is in data directory
+	if !strings.HasPrefix(file, "data/") {
+		file = "data/" + file
+	}
+
 	bl := &Blacklist{file: file}
 	bl.load()
 	return bl
@@ -90,7 +95,7 @@ func (b *Blacklist) save() {
 		return
 	}
 	if err := os.WriteFile(b.file, data, 0644); err != nil {
-		log.Println("Error with writing in blacklist:", err)
+		log.Printf("Error with writing blacklist to %s: %v", b.file, err)
 	}
 }
 
@@ -98,12 +103,13 @@ func (b *Blacklist) load() {
 	data, err := os.ReadFile(b.file)
 	if err != nil {
 		if os.IsNotExist(err) {
+			log.Printf("Blacklist file %s does not exist, creating new one", b.file)
 			return
 		}
-		log.Println("Eror with reading blacklist:", err)
+		log.Printf("Error with reading blacklist from %s: %v", b.file, err)
 		return
 	}
 	if err := json.Unmarshal(data, b); err != nil {
-		log.Println("Error with unmarshalling blacklist:", err)
+		log.Printf("Error with unmarshalling blacklist from %s: %v", b.file, err)
 	}
 }

@@ -1,6 +1,10 @@
 package main
 
-import tb "gopkg.in/telebot.v4"
+import (
+	"UEPB/interfaces"
+
+	tb "gopkg.in/telebot.v4"
+)
 
 type Question struct {
 	Text    string
@@ -8,8 +12,28 @@ type Question struct {
 	Answer  string
 }
 
+func (q Question) GetText() string {
+	return q.Text
+}
+
+func (q Question) GetButtons() []tb.InlineButton {
+	return q.Buttons
+}
+
+func (q Question) GetAnswer() string {
+	return q.Answer
+}
+
 type Quiz struct {
 	Questions []Question
+}
+
+func (quiz Quiz) GetQuestions() []interfaces.QuestionInterface {
+	questions := make([]interfaces.QuestionInterface, len(quiz.Questions))
+	for i, q := range quiz.Questions {
+		questions[i] = q
+	}
+	return questions
 }
 
 func ib(unique, text string) tb.InlineButton {
