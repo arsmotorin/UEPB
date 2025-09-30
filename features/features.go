@@ -55,7 +55,7 @@ func (fh *FeatureHandler) OnlyNewbies(handler func(tb.Context) error) func(tb.Co
 	}
 }
 
-// SendOrEdit sends a new message or edits existing one
+// SendOrEdit sends a new message or edits an existing one
 func (fh *FeatureHandler) SendOrEdit(chat *tb.Chat, msg *tb.Message, text string, rm *tb.ReplyMarkup) *tb.Message {
 	var err error
 	if msg == nil {
@@ -98,7 +98,7 @@ func (fh *FeatureHandler) SetUserRestriction(chat *tb.Chat, user *tb.User, allow
 	}
 }
 
-// GetNewUsers extracts new users from join message
+// GetNewUsers extracts new users from a join message
 func GetNewUsers(msg *tb.Message) []*tb.User {
 	if len(msg.UsersJoined) > 0 {
 		users := make([]*tb.User, len(msg.UsersJoined))
@@ -132,7 +132,7 @@ func (fh *FeatureHandler) HandleUserJoined(c tb.Context) error {
 			text = fmt.Sprintf("👋 Привет, @%s!\n\nВыбери, что тебя интересует, используя кнопки ниже.", u.Username)
 		}
 		msg := fh.SendOrEdit(c.Chat(), nil, text, keyboard)
-		fh.adminHandler.DeleteAfter(msg, 2*time.Minute)
+		fh.adminHandler.DeleteAfter(msg, 5*time.Minute)
 		fh.state.InitUser(int(u.ID))
 
 		// Log to admin chat
@@ -243,7 +243,7 @@ func (fh *FeatureHandler) RegisterQuizHandlers(bot *tb.Bot) {
 	}
 }
 
-// CreateQuizHandler creates a handler for quiz button
+// CreateQuizHandler creates a handler for the quiz button
 func (fh *FeatureHandler) CreateQuizHandler(i int, q interfaces.QuestionInterface, btn tb.InlineButton) func(tb.Context) error {
 	return func(c tb.Context) error {
 		userID := int(c.Sender().ID)
@@ -258,7 +258,9 @@ func (fh *FeatureHandler) CreateQuizHandler(i int, q interfaces.QuestionInterfac
 			return nil
 		}
 
-		if fh.state.TotalCorrect(userID) == len(questions) {
+		totalCorrect := fh.state.TotalCorrect(userID)
+		totalQuestions := len(questions)
+		if totalCorrect >= 2 {
 			fh.SetUserRestriction(c.Chat(), c.Sender(), true)
 			fh.state.ClearNewbie(userID)
 			msg := fh.SendOrEdit(c.Chat(), c.Message(), "✅ Верификация пройдена! Теперь можно писать в чат.", nil)
@@ -270,8 +272,8 @@ func (fh *FeatureHandler) CreateQuizHandler(i int, q interfaces.QuestionInterfac
 				"Правильных ответов: %d/%d\n"+
 				"Чат: %s (ID: %d)",
 				fh.adminHandler.GetUserDisplayName(c.Sender()),
-				fh.state.TotalCorrect(userID),
-				len(questions),
+				totalCorrect,
+				totalQuestions,
 				c.Chat().Title,
 				c.Chat().ID)
 			fh.adminHandler.LogToAdmin(logMsg)
@@ -285,8 +287,8 @@ func (fh *FeatureHandler) CreateQuizHandler(i int, q interfaces.QuestionInterfac
 				"Правильных ответов: %d/%d\n"+
 				"Чат: %s (ID: %d)",
 				fh.adminHandler.GetUserDisplayName(c.Sender()),
-				fh.state.TotalCorrect(userID),
-				len(questions),
+				totalCorrect,
+				totalQuestions,
 				c.Chat().Title,
 				c.Chat().ID)
 			fh.adminHandler.LogToAdmin(logMsg)
@@ -324,7 +326,7 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 		fh.adminHandler.AddViolation(msg.Sender.ID)
 		violationCount := fh.adminHandler.GetViolations(msg.Sender.ID)
 
-		// Delete message
+		// Delete the message
 		if err := fh.bot.Delete(msg); err != nil {
 			log.Printf("[ERROR] Failed to delete message %d from %d: %v", msg.ID, msg.Sender.ID, err)
 		} else {
