@@ -1,24 +1,22 @@
 #!/bin/bash
 
 SESSION_NAME="uepb-bot"
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo "Stopping..."
-./stop-bot.sh
+"$SCRIPT_DIR/stop-bot.sh" || true
 
 echo "Updating..."
-git stash
-git pull origin main
-git stash pop
+git -C "$REPO_ROOT" pull
 
 echo "Building..."
-go build -o uepb-bot .
-
-if [ $? -ne 0 ]; then
+if ! (cd "$REPO_ROOT" && go build -o uepb-bot .); then
     echo "Error!"
     exit 1
 fi
 
 echo "Starting..."
-./start-bot.sh
+"$SCRIPT_DIR/start-bot.sh"
 
 echo "Update complete."
