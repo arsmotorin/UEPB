@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -309,14 +310,46 @@ func (h *Handler) handleSpamBan(c tb.Context) error {
 		return nil
 	}
 
-	// Check if the command is a reply to a message
-	if c.Message().ReplyTo == nil {
-		msg, _ := h.bot.Send(c.Chat(), "💡 Используй команду /spamban в ответ на сообщение пользователя, которого нужно забанить.")
-		h.deleteAfter(msg, 10*time.Second)
-		return nil
+	var targetUser *tb.User
+
+	// Check if the command is a reply
+	if c.Message().ReplyTo != nil && c.Message().ReplyTo.Sender != nil {
+		targetUser = c.Message().ReplyTo.Sender
+	} else {
+		args := strings.Fields(c.Message().Text)
+		if len(args) < 2 {
+			msg, _ := h.bot.Send(c.Chat(), "💡 Используй: /spamban в ответ на сообщение или /spamban айди/юзернейм")
+			h.deleteAfter(msg, 10*time.Second)
+			return nil
+		}
+		identifier := args[1]
+		if strings.HasPrefix(identifier, "@") {
+			// Username
+			user, err := h.bot.ChatMemberOf(c.Chat(), &tb.User{Username: identifier[1:]})
+			if err != nil || user.User == nil {
+				msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось найти пользователя по username.")
+				h.deleteAfter(msg, 10*time.Second)
+				return nil
+			}
+			targetUser = user.User
+		} else {
+			// ID
+			id, err := strconv.ParseInt(identifier, 10, 64)
+			if err != nil {
+				msg, _ := h.bot.Send(c.Chat(), "❌ Неверный формат ID.")
+				h.deleteAfter(msg, 10*time.Second)
+				return nil
+			}
+			user, err := h.bot.ChatMemberOf(c.Chat(), &tb.User{ID: id})
+			if err != nil || user.User == nil {
+				msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось найти пользователя по ID.")
+				h.deleteAfter(msg, 10*time.Second)
+				return nil
+			}
+			targetUser = user.User
+		}
 	}
 
-	targetUser := c.Message().ReplyTo.Sender
 	if targetUser == nil {
 		msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось определить пользователя для бана.")
 		h.deleteAfter(msg, 10*time.Second)
@@ -336,11 +369,6 @@ func (h *Handler) handleSpamBan(c tb.Context) error {
 		return nil
 	}
 
-	if err := h.bot.Delete(c.Message().ReplyTo); err != nil {
-		log.Printf("[ERROR] Failed to delete target message: %v", err)
-	}
-
-	// Reset the violation counter for the user
 	delete(h.violations, targetUser.ID)
 
 	msg, _ := h.bot.Send(c.Chat(), fmt.Sprintf("🔨 Пользователь %s забанен за спам.", h.getUserDisplayName(targetUser)))
