@@ -15,6 +15,7 @@ type Handler struct {
 	quiz        Quiz
 	blacklist   *Blacklist
 	adminChatID int64
+	violations  map[int64]int
 	Btns        struct {
 		Student, Guest, Ads tb.InlineButton
 	}
@@ -27,6 +28,7 @@ func NewHandler(bot *tb.Bot, state *State, quiz Quiz, adminChatID int64) *Handle
 		quiz:        quiz,
 		blacklist:   NewBlacklist("blacklist.json"),
 		adminChatID: adminChatID,
+		violations:  make(map[int64]int),
 	}
 	h.Btns.Student, h.Btns.Guest, h.Btns.Ads = StudentButton(), GuestButton(), AdsButton()
 	return h
@@ -43,6 +45,7 @@ func (h *Handler) Register() {
 	h.bot.Handle("/banword", h.handleBan)
 	h.bot.Handle("/unbanword", h.handleUnban)
 	h.bot.Handle("/listbanword", h.handleListBan)
+	h.bot.Handle("/spamban", h.handleSpamBan)
 	h.bot.Handle("/ping", h.handlePing)
 	h.bot.Handle(tb.OnText, h.filterMessage)
 
@@ -56,6 +59,7 @@ func (h *Handler) setBotCommands() {
 		{Text: "banword", Description: "Добавить запрещённое слово"},
 		{Text: "unbanword", Description: "Удалить запрещённое слово"},
 		{Text: "listbanword", Description: "Показать список запрещённых слов"},
+		{Text: "spamban", Description: "Забанить пользователя за спам (в ответ на сообщение)"},
 	}
 
 	if err := h.bot.SetCommands(commands); err != nil {
@@ -139,6 +143,15 @@ func (h *Handler) setUserRestriction(chat *tb.Chat, user *tb.User, allowAll bool
 	}
 }
 
+func (h *Handler) banUser(chat *tb.Chat, user *tb.User) error {
+	member := &tb.ChatMember{
+		User:   user,
+		Rights: tb.Rights{},
+	}
+
+	return h.bot.Ban(chat, member)
+}
+
 func getNewUsers(msg *tb.Message) []*tb.User {
 	if len(msg.UsersJoined) > 0 {
 		users := make([]*tb.User, len(msg.UsersJoined))
@@ -162,6 +175,15 @@ func (h *Handler) getUserDisplayName(user *tb.User) string {
 		name += " " + user.LastName
 	}
 	return name + fmt.Sprintf(" (ID: %d)", user.ID)
+}
+
+func (h *Handler) isAdmin(chat *tb.Chat, user *tb.User) bool {
+	member, err := h.bot.ChatMemberOf(chat, user)
+	if err != nil {
+		log.Printf("[ERROR] Failed to check member rights: %v", err)
+		return false
+	}
+	return member.Role == tb.Administrator || member.Role == tb.Creator
 }
 
 // Handlers
@@ -205,6 +227,9 @@ func (h *Handler) handleUserLeft(c tb.Context) error {
 
 	user := c.Message().UserLeft
 	h.state.ClearNewbie(int(user.ID))
+
+	// Reset
+	delete(h.violations, user.ID)
 
 	// Log to admin chat
 	logMsg := fmt.Sprintf("👋 Участник покинул чат\n\n"+
@@ -269,6 +294,68 @@ func (h *Handler) handlePing(c tb.Context) error {
 	if err != nil {
 		log.Printf("[ERROR] Failed to edit ping message: %v", err)
 	}
+
+	return nil
+}
+
+func (h *Handler) handleSpamBan(c tb.Context) error {
+	if c.Message() == nil || c.Sender() == nil {
+		return nil
+	}
+
+	if !h.isAdmin(c.Chat(), c.Sender()) {
+		msg, _ := h.bot.Send(c.Chat(), "⛔ Команда /spamban доступна только администрации.")
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
+	}
+
+	// Check if the command is a reply to a message
+	if c.Message().ReplyTo == nil {
+		msg, _ := h.bot.Send(c.Chat(), "💡 Используй команду /spamban в ответ на сообщение пользователя, которого нужно забанить.")
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
+	}
+
+	targetUser := c.Message().ReplyTo.Sender
+	if targetUser == nil {
+		msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось определить пользователя для бана.")
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
+	}
+
+	if h.isAdmin(c.Chat(), targetUser) {
+		msg, _ := h.bot.Send(c.Chat(), "⛔ Нельзя забанить администратора.")
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
+	}
+
+	if err := h.banUser(c.Chat(), targetUser); err != nil {
+		log.Printf("[ERROR] Failed to ban user %d: %v", targetUser.ID, err)
+		msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось забанить пользователя: "+err.Error())
+		h.deleteAfter(msg, 10*time.Second)
+		return nil
+	}
+
+	if err := h.bot.Delete(c.Message().ReplyTo); err != nil {
+		log.Printf("[ERROR] Failed to delete target message: %v", err)
+	}
+
+	// Reset the violation counter for the user
+	delete(h.violations, targetUser.ID)
+
+	msg, _ := h.bot.Send(c.Chat(), fmt.Sprintf("🔨 Пользователь %s забанен за спам.", h.getUserDisplayName(targetUser)))
+	h.deleteAfter(msg, 10*time.Second)
+
+	// Log to admin chat
+	logMsg := fmt.Sprintf("🔨 Пользователь забанен за спам\n\n"+
+		"Забанен: %s\n"+
+		"Админ: %s\n"+
+		"Чат: %s (ID: %d)",
+		h.getUserDisplayName(targetUser),
+		h.getUserDisplayName(c.Sender()),
+		c.Chat().Title,
+		c.Chat().ID)
+	h.logToAdmin(logMsg)
 
 	return nil
 }
@@ -341,17 +428,7 @@ func (h *Handler) handleBan(c tb.Context) error {
 		return nil
 	}
 
-	member, err := h.bot.ChatMemberOf(c.Chat(), c.Sender())
-	if err != nil {
-		log.Printf("[ERROR] Failed to check member rights: %v", err)
-		msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось проверить права: "+err.Error())
-		h.deleteAfter(msg, 10*time.Second)
-		return nil
-	}
-
-	log.Printf("[DEBUG] User %d has role: %s", c.Sender().ID, member.Role)
-
-	if member.Role != tb.Administrator && member.Role != tb.Creator {
+	if !h.isAdmin(c.Chat(), c.Sender()) {
 		msg, _ := h.bot.Send(c.Chat(), "⛔ Команда /banword доступна только администрации.")
 		h.deleteAfter(msg, 10*time.Second)
 		return nil
@@ -391,14 +468,7 @@ func (h *Handler) handleUnban(c tb.Context) error {
 		return nil
 	}
 
-	member, err := h.bot.ChatMemberOf(c.Chat(), c.Sender())
-	if err != nil {
-		log.Printf("[ERROR] Failed to check member rights: %v", err)
-		msg, _ := h.bot.Send(c.Chat(), "❌ Не удалось проверить права: "+err.Error())
-		h.deleteAfter(msg, 10*time.Second)
-		return nil
-	}
-	if member.Role != tb.Administrator && member.Role != tb.Creator {
+	if !h.isAdmin(c.Chat(), c.Sender()) {
 		msg, _ := h.bot.Send(c.Chat(), "⛔ Команда /unbanword доступна только администрации.")
 		h.deleteAfter(msg, 10*time.Second)
 		return nil
@@ -477,10 +547,53 @@ func (h *Handler) filterMessage(c tb.Context) error {
 	log.Printf("[DEBUG] Checking message from user %d: '%s'", msg.Sender.ID, msg.Text)
 
 	if h.blacklist.CheckMessage(msg.Text) {
+		h.violations[msg.Sender.ID]++
+		violationCount := h.violations[msg.Sender.ID]
+
+		// Delete message
 		if err := h.bot.Delete(msg); err != nil {
 			log.Printf("[ERROR] Failed to delete message %d from %d: %v", msg.ID, msg.Sender.ID, err)
 		} else {
-			log.Printf("[DEBUG] Deleted message %d from %d", msg.ID, msg.Sender.ID)
+			log.Printf("[DEBUG] Deleted message %d from %d (violation #%d)", msg.ID, msg.Sender.ID, violationCount)
+		}
+
+		// If it's their second violation, ban
+		if violationCount >= 2 {
+			if err := h.banUser(c.Chat(), msg.Sender); err != nil {
+				log.Printf("[ERROR] Failed to ban user %d: %v", msg.Sender.ID, err)
+			} else {
+				log.Printf("[DEBUG] Banned user %d for repeated violations", msg.Sender.ID)
+
+				delete(h.violations, msg.Sender.ID)
+
+				// Log to admin chat
+				logMsg := fmt.Sprintf("🔨 Автоматический бан за банворды\n\n"+
+					"Забанен: %s\n"+
+					"Количество нарушений: %d\n"+
+					"Чат: %s (ID: %d)",
+					h.getUserDisplayName(msg.Sender),
+					violationCount,
+					c.Chat().Title,
+					c.Chat().ID)
+				h.logToAdmin(logMsg)
+			}
+		} else {
+			// Warning if it's their first violation
+			warningMsg, _ := h.bot.Send(c.Chat(), fmt.Sprintf("⚠️ %s, сообщение удалено. При повторном нарушении будет бан.", h.getUserDisplayName(msg.Sender)))
+			h.deleteAfter(warningMsg, 15*time.Second)
+
+			// Log to admin chat
+			logMsg := fmt.Sprintf("⚠️ Обнаружено нарушение\n\n"+
+				"Пользователь: %s\n"+
+				"Нарушение: #%d\n"+
+				"Сообщение: `%s`\n"+
+				"Чат: %s (ID: %d)",
+				h.getUserDisplayName(msg.Sender),
+				violationCount,
+				msg.Text,
+				c.Chat().Title,
+				c.Chat().ID)
+			h.logToAdmin(logMsg)
 		}
 	}
 	return nil
