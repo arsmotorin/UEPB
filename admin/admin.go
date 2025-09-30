@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,10 +28,18 @@ type AdminHandler struct {
 
 // NewAdminHandler creates a new admin handler
 func NewAdminHandler(bot *tb.Bot, blacklist interfaces.BlacklistInterface, adminChatID int64, violations map[int64]int) *AdminHandler {
-	// Create data dir
-	os.MkdirAll("data", 0755)
+	// Create data dir with logging
+	dataDir := "data"
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Printf("[ERROR] Failed to create data directory %s: %v", dataDir, err)
+	} else {
+		absPath, _ := filepath.Abs(dataDir)
+		log.Printf("[INFO] Admin data directory ensured: %s", absPath)
+	}
 
 	file := "data/violations.json"
+	absFile, _ := filepath.Abs(file)
+	log.Printf("[INFO] Admin violations file path: %s", absFile)
 
 	ah := &AdminHandler{
 		bot:            bot,
@@ -117,8 +126,14 @@ func (ah *AdminHandler) HandleBan(c tb.Context) error {
 		return nil
 	}
 
+	// Log before attempting to add
+	log.Printf("[INFO] Admin %s attempting to add blacklist phrase: %v in chat %s (ID: %d)",
+		ah.GetUserDisplayName(c.Sender()), args[1:], c.Chat().Title, c.Chat().ID)
+
 	ah.blacklist.AddPhrase(args[1:])
-	log.Printf("[DEBUG] Added blacklist phrase: %v", args[1:])
+
+	// Log after adding
+	log.Printf("[SUCCESS] Admin successfully executed AddPhrase for: %v", args[1:])
 
 	msg, _ := ah.bot.Send(c.Chat(), "✅ Добавлено запрещённое словосочетание: "+strings.Join(args[1:], " "))
 	ah.DeleteAfter(msg, 10*time.Second)
@@ -158,11 +173,15 @@ func (ah *AdminHandler) HandleUnban(c tb.Context) error {
 		return nil
 	}
 
+	// Log before attempting to remove
+	log.Printf("[INFO] Admin %s attempting to remove blacklist phrase: %v in chat %s (ID: %d)",
+		ah.GetUserDisplayName(c.Sender()), args[1:], c.Chat().Title, c.Chat().ID)
+
 	ok := ah.blacklist.RemovePhrase(args[1:])
 	var text string
 	if ok {
 		text = "✅ Удалено запрещённое словосочетание: " + strings.Join(args[1:], " ")
-		log.Printf("[DEBUG] Removed blacklist phrase: %v", args[1:])
+		log.Printf("[SUCCESS] Admin successfully removed blacklist phrase: %v", args[1:])
 
 		// Log to admin chat
 		logMsg := fmt.Sprintf("✅ Удалено запрещённое слово\n\n"+
@@ -176,7 +195,7 @@ func (ah *AdminHandler) HandleUnban(c tb.Context) error {
 		ah.LogToAdmin(logMsg)
 	} else {
 		text = "❌ Такого словосочетания нет в списке."
-		log.Printf("[DEBUG] Phrase not found in blacklist: %v", args[1:])
+		log.Printf("[WARNING] Admin tried to remove non-existent blacklist phrase: %v", args[1:])
 	}
 	msg, _ := ah.bot.Send(c.Chat(), text)
 	ah.DeleteAfter(msg, 10*time.Second)
@@ -200,7 +219,12 @@ func (ah *AdminHandler) HandleListBan(c tb.Context) error {
 		}
 	}
 
+	log.Printf("[INFO] Admin %s requested blacklist in chat %s (ID: %d)",
+		ah.GetUserDisplayName(c.Sender()), c.Chat().Title, c.Chat().ID)
+
 	phrases := ah.blacklist.List()
+	log.Printf("[INFO] Retrieved %d blacklist phrases for display", len(phrases))
+
 	if len(phrases) == 0 {
 		ah.bot.Send(c.Chat(), "📭 Список пуст.")
 		return nil
@@ -332,34 +356,47 @@ func (ah *AdminHandler) ClearViolations(userID int64) {
 func (ah *AdminHandler) saveViolations() {
 	data, err := json.MarshalIndent(ah.violations, "", "  ")
 	if err != nil {
-		log.Printf("Error with serialization violations: %v", err)
+		log.Printf("[ERROR] Failed to marshal violations: %v", err)
 		return
 	}
+
+	absPath, _ := filepath.Abs(ah.violationsFile)
+	log.Printf("[DEBUG] Saving violations to: %s", absPath)
+
 	if err := os.WriteFile(ah.violationsFile, data, 0644); err != nil {
-		log.Printf("Error with writing violations to %s: %v", ah.violationsFile, err)
+		log.Printf("[ERROR] Failed to write violations to %s: %v", absPath, err)
+	} else {
+		log.Printf("[DEBUG] Successfully saved violations to: %s", absPath)
 	}
 }
 
 func (ah *AdminHandler) loadViolations() {
+	absPath, _ := filepath.Abs(ah.violationsFile)
+	log.Printf("[INFO] Loading violations from: %s", absPath)
+
 	data, err := os.ReadFile(ah.violationsFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("Violations file %s does not exist, creating new one", ah.violationsFile)
+			log.Printf("[INFO] Violations file %s does not exist, will create when needed", absPath)
 			return
 		}
-		log.Printf("Error with reading violations from %s: %v", ah.violationsFile, err)
+		log.Printf("[ERROR] Failed to read violations from %s: %v", absPath, err)
 		return
 	}
+
+	log.Printf("[DEBUG] Read %d bytes from violations file: %s", len(data), absPath)
 
 	ah.violationsMu.Lock()
 	defer ah.violationsMu.Unlock()
 
 	if err := json.Unmarshal(data, &ah.violations); err != nil {
-		log.Printf("Error with unmarshalling violations from %s: %v", ah.violationsFile, err)
+		log.Printf("[ERROR] Failed to unmarshal violations from %s: %v", absPath, err)
 		return
 	}
 
 	if ah.violations == nil {
 		ah.violations = make(map[int64]int)
 	}
+
+	log.Printf("[SUCCESS] Loaded %d violation records from: %s", len(ah.violations), absPath)
 }
