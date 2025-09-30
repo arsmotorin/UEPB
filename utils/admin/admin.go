@@ -25,6 +25,11 @@ func ReplyAndDelete(ah interfaces.AdminHandlerInterface, c tb.Context, text stri
 	ah.DeleteAfter(msg, d)
 }
 
+// Reply sends a reply
+func Reply(ah interfaces.AdminHandlerInterface, c tb.Context, text string) {
+	_, _ = ah.Bot().Send(c.Chat(), text)
+}
+
 // ResolveTargetUser resolves a user from a reply or command argument
 func ResolveTargetUser(ah interfaces.AdminHandlerInterface, c tb.Context) *tb.User {
 	if c.Message().ReplyTo != nil && c.Message().ReplyTo.Sender != nil {

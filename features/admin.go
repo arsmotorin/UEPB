@@ -200,7 +200,7 @@ func (ah *AdminHandler) HandleSpamBan(c tb.Context) error {
 	}
 	ah.BanUserEverywhere(targetUser)
 	ah.ClearViolations(targetUser.ID)
-	admin.ReplyAndDelete(ah, c, fmt.Sprintf("🔨 Пользователь %s забанен за спам.", ah.GetUserDisplayName(targetUser)), 10*time.Second)
+	admin.Reply(ah, c, fmt.Sprintf("🔨 Пользователь %s забанен за спам.", ah.GetUserDisplayName(targetUser)))
 	ah.LogToAdmin(fmt.Sprintf("🔨 Пользователь забанен за спам.\n\nЗабанен: %s\nАдмин: %s", ah.GetUserDisplayName(targetUser), ah.GetUserDisplayName(c.Sender())))
 	return nil
 }
