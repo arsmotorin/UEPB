@@ -1,4 +1,4 @@
-package main
+package blacklist
 
 import (
 	"encoding/json"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"UEPB/utils/interfaces"
 )
 
 type Blacklist struct {
@@ -16,7 +18,8 @@ type Blacklist struct {
 	file    string
 }
 
-func NewBlacklist(file string) *Blacklist {
+// NewBlacklist creates a new blacklist
+func NewBlacklist(file string) interfaces.BlacklistInterface {
 	// Create data dir with explicit logging
 	dataDir := "data"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -199,13 +202,5 @@ func (b *Blacklist) load() {
 		b.Phrases = make([][]string, 0)
 	}
 
-	log.Printf("[SUCCESS] Loaded %d blacklist phrases from: %s", len(b.Phrases), absPath)
-
-	// Log loaded phrases for debugging
-	if len(b.Phrases) > 0 {
-		log.Printf("[DEBUG] Loaded phrases:")
-		for i, phrase := range b.Phrases {
-			log.Printf("[DEBUG]   %d: %v", i+1, phrase)
-		}
-	}
+	log.Printf("[SUCCESS] Loaded %d blacklisted phrases from: %s", len(b.Phrases), absPath)
 }

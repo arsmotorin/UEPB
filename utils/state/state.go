@@ -1,4 +1,4 @@
-package main
+package state
 
 import (
 	"encoding/json"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"UEPB/utils/interfaces"
 )
 
 type State struct {
@@ -16,7 +18,8 @@ type State struct {
 	file        string       `json:"-"`
 }
 
-func NewState() *State {
+// NewState creates a new State instance
+func NewState() interfaces.UserState {
 	// Create data dir with logging
 	dataDir := "data"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -129,13 +132,15 @@ func (s *State) load() {
 
 	if err := json.Unmarshal(data, s); err != nil {
 		log.Printf("[ERROR] Failed to unmarshal state from %s: %v", absPath, err)
-		return
+		// Reset to default values on error
+		s.UserCorrect = make(map[int]int)
+		s.NewbieMap = make(map[int]bool)
 	}
 
-	// Restore the file path after unmarshaling
+	// Restore file path after unmarshaling
 	s.file = file
 
-	// Ensure maps are initialized after loading
+	// Initialize maps if nil
 	if s.UserCorrect == nil {
 		s.UserCorrect = make(map[int]int)
 	}
@@ -143,6 +148,5 @@ func (s *State) load() {
 		s.NewbieMap = make(map[int]bool)
 	}
 
-	log.Printf("[SUCCESS] Loaded state from: %s (users: %d, newbies: %d)",
-		absPath, len(s.UserCorrect), len(s.NewbieMap))
+	log.Printf("[SUCCESS] Loaded state from: %s (users: %d, newbies: %d)", absPath, len(s.UserCorrect), len(s.NewbieMap))
 }

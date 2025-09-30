@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"UEPB/interfaces"
+	"UEPB/utils/interfaces"
 
 	tb "gopkg.in/telebot.v4"
 )

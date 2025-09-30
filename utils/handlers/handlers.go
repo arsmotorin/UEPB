@@ -1,20 +1,22 @@
-package main
+package handlers
 
 import (
 	"log"
 
-	"UEPB/admin"
 	"UEPB/features"
-	"UEPB/interfaces"
+	"UEPB/utils/blacklist"
+	"UEPB/utils/interfaces"
+	"UEPB/utils/quiz"
+	"UEPB/utils/state"
 
 	tb "gopkg.in/telebot.v4"
 )
 
 type Handler struct {
 	bot            *tb.Bot
-	state          *State
-	quiz           Quiz
-	blacklist      *Blacklist
+	state          interfaces.UserState
+	quiz           interfaces.QuizInterface
+	blacklist      interfaces.BlacklistInterface
 	adminChatID    int64
 	violations     map[int64]int
 	adminHandler   interfaces.AdminHandlerInterface
@@ -24,32 +26,41 @@ type Handler struct {
 	}
 }
 
-func NewHandler(bot *tb.Bot, state *State, quiz Quiz, adminChatID int64) *Handler {
+// NewHandler creates a new Handler
+func NewHandler(bot *tb.Bot, adminChatID int64) *Handler {
 	violations := make(map[int64]int)
-	blacklist := NewBlacklist("blacklist.json")
+
+	// Initialize dependencies
+	userState := state.NewState()
+	quizInterface := quiz.DefaultQuiz()
+	blacklistInterface := blacklist.NewBlacklist("blacklist.json")
 
 	h := &Handler{
 		bot:         bot,
-		state:       state,
-		quiz:        quiz,
-		blacklist:   blacklist,
+		state:       userState,
+		quiz:        quizInterface,
+		blacklist:   blacklistInterface,
 		adminChatID: adminChatID,
 		violations:  violations,
 	}
 
-	h.Btns.Student, h.Btns.Guest, h.Btns.Ads = StudentButton(), GuestButton(), AdsButton()
+	// Initialize buttons
+	h.Btns.Student = quiz.StudentButton()
+	h.Btns.Guest = quiz.GuestButton()
+	h.Btns.Ads = quiz.AdsButton()
 
 	// Initialize admin handler
-	adminHandler := admin.NewAdminHandler(bot, blacklist, adminChatID, violations)
+	adminHandler := features.NewAdminHandler(bot, blacklistInterface, adminChatID, violations)
 	h.adminHandler = adminHandler
 
 	// Initialize feature handler
-	featureHandler := features.NewFeatureHandler(bot, state, quiz, blacklist, adminChatID, violations, adminHandler, h.Btns)
+	featureHandler := features.NewFeatureHandler(bot, userState, quizInterface, blacklistInterface, adminChatID, violations, adminHandler, h.Btns)
 	h.featureHandler = featureHandler
 
 	return h
 }
 
+// Register registers all handlers
 func (h *Handler) Register() {
 	// User events
 	h.bot.Handle(tb.OnUserJoined, h.featureHandler.HandleUserJoined)
@@ -79,6 +90,7 @@ func (h *Handler) Register() {
 	h.setBotCommands()
 }
 
+// setBotCommands sets bot commands
 func (h *Handler) setBotCommands() {
 	commands := []tb.Command{
 		{Text: "ping", Description: "Проверить отклик бота"},

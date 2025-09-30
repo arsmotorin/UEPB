@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"UEPB/utils/handlers"
+
 	"github.com/joho/godotenv"
 	tb "gopkg.in/telebot.v4"
 )
@@ -36,7 +38,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	h := NewHandler(bot, NewState(), DefaultQuiz(), adminChatID)
+	h := handlers.NewHandler(bot, adminChatID)
 	h.Register()
 
 	log.Println("Bot has started!")

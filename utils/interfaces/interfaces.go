@@ -51,6 +51,7 @@ type AdminHandlerInterface interface {
 	AddViolation(userID int64)
 	GetViolations(userID int64) int
 	ClearViolations(userID int64)
+	Bot() *tb.Bot
 }
 
 // FeatureHandlerInterface interface for feature functionality
