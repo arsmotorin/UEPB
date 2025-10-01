@@ -3,13 +3,15 @@ package blacklist
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"UEPB/utils/interfaces"
+	"UEPB/utils/logger"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Blacklist struct {
@@ -20,14 +22,18 @@ type Blacklist struct {
 
 // NewBlacklist creates a new blacklist
 func NewBlacklist(file string) interfaces.BlacklistInterface {
-	// Create data dir with explicit logging
+	// Create data dir
 	dataDir := "data"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		log.Printf("[ERROR] Failed to create data directory %s: %v", dataDir, err)
+		logger.Error("Failed to create data directory", err, logrus.Fields{
+			"directory": dataDir,
+		})
 	} else {
 		// Get absolute path for logging
 		absPath, _ := filepath.Abs(dataDir)
-		log.Printf("[INFO] Data directory ensured: %s", absPath)
+		logger.Info("Data directory ensured", logrus.Fields{
+			"path": absPath,
+		})
 	}
 
 	// Ensure file is in data directory
@@ -37,7 +43,9 @@ func NewBlacklist(file string) interfaces.BlacklistInterface {
 
 	// Get absolute path for logging
 	absFile, _ := filepath.Abs(file)
-	log.Printf("[INFO] Blacklist file path: %s", absFile)
+	logger.Info("Blacklist file path", logrus.Fields{
+		"path": absFile,
+	})
 
 	bl := &Blacklist{file: file}
 	bl.load()
@@ -55,17 +63,23 @@ func (b *Blacklist) AddPhrase(words []string) {
 	}
 
 	b.Phrases = append(b.Phrases, lowerWords)
-	log.Printf("[INFO] Adding blacklist phrase: %v to file: %s", lowerWords, b.file)
+	logger.Info("Adding blacklist phrase", logrus.Fields{
+		"phrase": lowerWords,
+		"file":   b.file,
+	})
 
 	if err := b.save(); err != nil {
-		log.Printf("[ERROR] Failed to save blacklist after adding phrase %v: %v", lowerWords, err)
+		logger.Error("Failed to save blacklist after adding phrase", err, logrus.Fields{
+			"phrase": lowerWords,
+		})
 	} else {
 		// Verify the phrase was actually saved
 		absPath, _ := filepath.Abs(b.file)
-		log.Printf("[SUCCESS] Blacklist phrase %v successfully saved to: %s", lowerWords, absPath)
-
-		// Log current total phrases count
-		log.Printf("[INFO] Total blacklisted phrases: %d", len(b.Phrases))
+		logger.Info("Blacklist phrase successfully saved", logrus.Fields{
+			"phrase": lowerWords,
+			"path":   absPath,
+			"total":  len(b.Phrases),
+		})
 	}
 }
 
@@ -80,25 +94,36 @@ func (b *Blacklist) RemovePhrase(words []string) bool {
 	}
 
 	target := strings.Join(lowerWords, " ")
-	log.Printf("[INFO] Attempting to remove blacklist phrase: %v from file: %s", lowerWords, b.file)
+	logger.Info("Attempting to remove blacklist phrase", logrus.Fields{
+		"phrase": lowerWords,
+		"file":   b.file,
+	})
 
 	for i, p := range b.Phrases {
 		if strings.Join(p, " ") == target {
 			b.Phrases = append(b.Phrases[:i], b.Phrases[i+1:]...)
 
 			if err := b.save(); err != nil {
-				log.Printf("[ERROR] Failed to save blacklist after removing phrase %v: %v", lowerWords, err)
+				logger.Error("Failed to save blacklist after removing phrase", err, logrus.Fields{
+					"phrase": lowerWords,
+				})
 				return false
 			}
 
 			absPath, _ := filepath.Abs(b.file)
-			log.Printf("[SUCCESS] Blacklist phrase %v successfully removed from: %s", lowerWords, absPath)
-			log.Printf("[INFO] Total blacklisted phrases: %d", len(b.Phrases))
+			logger.Info("Blacklist phrase successfully removed", logrus.Fields{
+				"phrase": lowerWords,
+				"path":   absPath,
+				"total":  len(b.Phrases),
+			})
 			return true
 		}
 	}
 
-	log.Printf("[WARNING] Blacklist phrase %v not found in file: %s", lowerWords, b.file)
+	logger.Warn("Blacklist phrase not found", logrus.Fields{
+		"phrase": lowerWords,
+		"file":   b.file,
+	})
 	return false
 }
 
@@ -114,7 +139,10 @@ func (b *Blacklist) CheckMessage(msg string) bool {
 			// One word anywhere in the message
 			for _, w := range words {
 				if w == phrase[0] {
-					log.Printf("[DETECTION] Blacklisted word detected: '%s' in message: '%s'", phrase[0], msg)
+					logger.Info("Blacklisted word detected", logrus.Fields{
+						"word":    phrase[0],
+						"message": msg,
+					})
 					return true
 				}
 			}
@@ -128,7 +156,10 @@ func (b *Blacklist) CheckMessage(msg string) bool {
 				}
 			}
 			if found {
-				log.Printf("[DETECTION] Blacklisted phrase detected: '%s' in message: '%s'", strings.Join(phrase, " "), msg)
+				logger.Info("Blacklisted phrase detected", logrus.Fields{
+					"phrase":  strings.Join(phrase, " "),
+					"message": msg,
+				})
 				return true
 			}
 		}
@@ -139,7 +170,10 @@ func (b *Blacklist) CheckMessage(msg string) bool {
 func (b *Blacklist) List() [][]string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	log.Printf("[INFO] Listing blacklist phrases from file: %s (total: %d)", b.file, len(b.Phrases))
+	logger.Info("Listing blacklist phrases", logrus.Fields{
+		"file":  b.file,
+		"total": len(b.Phrases),
+	})
 	return append([][]string(nil), b.Phrases...)
 }
 
@@ -151,12 +185,16 @@ func (b *Blacklist) save() error {
 
 	// Get file info before writing
 	absPath, _ := filepath.Abs(b.file)
-	log.Printf("[DEBUG] Attempting to write blacklist to: %s", absPath)
+	logger.Debug("Attempting to write blacklist", logrus.Fields{
+		"path": absPath,
+	})
 
 	// Check if directory exists
 	dir := filepath.Dir(b.file)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		log.Printf("[WARNING] Directory %s does not exist, creating it", dir)
+		logger.Warn("Directory does not exist, creating it", logrus.Fields{
+			"directory": dir,
+		})
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
@@ -168,9 +206,14 @@ func (b *Blacklist) save() error {
 
 	// Verify file was written successfully
 	if stat, err := os.Stat(b.file); err != nil {
-		log.Printf("[WARNING] Could not stat file after writing: %s", b.file)
+		logger.Warn("Could not stat file after writing", logrus.Fields{
+			"file": b.file,
+		})
 	} else {
-		log.Printf("[DEBUG] File successfully written: %s (size: %d bytes)", absPath, stat.Size())
+		logger.Debug("File successfully written", logrus.Fields{
+			"path": absPath,
+			"size": stat.Size(),
+		})
 	}
 
 	return nil
@@ -178,22 +221,33 @@ func (b *Blacklist) save() error {
 
 func (b *Blacklist) load() {
 	absPath, _ := filepath.Abs(b.file)
-	log.Printf("[INFO] Loading blacklist from: %s", absPath)
+	logger.Info("Loading blacklist", logrus.Fields{
+		"path": absPath,
+	})
 
 	data, err := os.ReadFile(b.file)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("[INFO] Blacklist file %s does not exist, will create new one when needed", absPath)
+			logger.Info("Blacklist file does not exist, will create new one when needed", logrus.Fields{
+				"path": absPath,
+			})
 			return
 		}
-		log.Printf("[ERROR] Failed to read blacklist from %s: %v", absPath, err)
+		logger.Error("Failed to read blacklist", err, logrus.Fields{
+			"path": absPath,
+		})
 		return
 	}
 
-	log.Printf("[DEBUG] Read %d bytes from blacklist file: %s", len(data), absPath)
+	logger.Debug("Read blacklist file", logrus.Fields{
+		"path": absPath,
+		"size": len(data),
+	})
 
 	if err := json.Unmarshal(data, b); err != nil {
-		log.Printf("[ERROR] Failed to unmarshal blacklist from %s: %v", absPath, err)
+		logger.Error("Failed to unmarshal blacklist", err, logrus.Fields{
+			"path": absPath,
+		})
 		return
 	}
 
@@ -202,5 +256,8 @@ func (b *Blacklist) load() {
 		b.Phrases = make([][]string, 0)
 	}
 
-	log.Printf("[SUCCESS] Loaded %d blacklisted phrases from: %s", len(b.Phrases), absPath)
+	logger.Info("Loaded blacklisted phrases", logrus.Fields{
+		"path":  absPath,
+		"total": len(b.Phrases),
+	})
 }

@@ -2,12 +2,13 @@ package features
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"UEPB/utils/interfaces"
+	"UEPB/utils/logger"
 
+	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
 )
 
@@ -64,7 +65,10 @@ func (fh *FeatureHandler) SendOrEdit(chat *tb.Chat, msg *tb.Message, text string
 		msg, err = fh.bot.Edit(msg, text, rm)
 	}
 	if err != nil {
-		log.Println("Message error:", err)
+		logger.Error("Message error", err, logrus.Fields{
+			"chat_id": chat.ID,
+			"action":  "send_or_edit",
+		})
 		return nil
 	}
 	return msg
@@ -78,7 +82,11 @@ func (fh *FeatureHandler) SetUserRestriction(chat *tb.Chat, user *tb.User, allow
 			User:            user,
 			RestrictedUntil: tb.Forever(),
 		}); err != nil {
-			log.Println("Unrestrict error:", err)
+			logger.Error("Failed to unrestrict user", err, logrus.Fields{
+				"chat_id": chat.ID,
+				"user_id": user.ID,
+				"action":  "unrestrict",
+			})
 		}
 	} else {
 		rights := tb.Rights{
@@ -88,7 +96,11 @@ func (fh *FeatureHandler) SetUserRestriction(chat *tb.Chat, user *tb.User, allow
 			User:   user,
 			Rights: rights,
 		}); err != nil {
-			log.Println("Restrict error:", err)
+			logger.Error("Failed to restrict user", err, logrus.Fields{
+				"chat_id": chat.ID,
+				"user_id": user.ID,
+				"action":  "restrict",
+			})
 		}
 	}
 }
@@ -204,7 +216,10 @@ func (fh *FeatureHandler) HandlePing(c tb.Context) error {
 	// Send the response and measure time
 	msg, err := fh.bot.Send(c.Chat(), "🏓 Понг!")
 	if err != nil {
-		log.Printf("[ERROR] Failed to send ping response: %v", err)
+		logger.Error("Failed to send ping response", err, logrus.Fields{
+			"chat_id": c.Chat().ID,
+			"user_id": c.Sender().ID,
+		})
 		return err
 	}
 
@@ -216,7 +231,10 @@ func (fh *FeatureHandler) HandlePing(c tb.Context) error {
 	finalText := fmt.Sprintf("🏓 Понг! (%d мс)", responseMs)
 	_, err = fh.bot.Edit(msg, finalText)
 	if err != nil {
-		log.Printf("[ERROR] Failed to edit ping message: %v", err)
+		logger.Error("Failed to edit ping message", err, logrus.Fields{
+			"chat_id": c.Chat().ID,
+			"user_id": c.Sender().ID,
+		})
 	}
 
 	return nil
@@ -303,7 +321,10 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 		return nil
 	}
 
-	log.Printf("[DEBUG] Checking message from user %d: '%s'", msg.Sender.ID, msg.Text)
+	logger.Debug("Checking message for blacklist violations", logrus.Fields{
+		"user_id": msg.Sender.ID,
+		"message": msg.Text,
+	})
 
 	if fh.blacklist.CheckMessage(msg.Text) {
 		fh.adminHandler.AddViolation(msg.Sender.ID)
@@ -311,17 +332,31 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 
 		// Delete the message
 		if err := fh.bot.Delete(msg); err != nil {
-			log.Printf("[ERROR] Failed to delete message %d from %d: %v", msg.ID, msg.Sender.ID, err)
+			logger.Error("Failed to delete message", err, logrus.Fields{
+				"message_id": msg.ID,
+				"user_id":    msg.Sender.ID,
+				"chat_id":    c.Chat().ID,
+			})
 		} else {
-			log.Printf("[DEBUG] Deleted message %d from %d (violation #%d)", msg.ID, msg.Sender.ID, violationCount)
+			logger.Debug("Deleted blacklisted message", logrus.Fields{
+				"message_id": msg.ID,
+				"user_id":    msg.Sender.ID,
+				"violation":  violationCount,
+			})
 		}
 
 		// If it's their second violation, ban
 		if violationCount >= 2 {
 			if err := fh.adminHandler.BanUser(c.Chat(), msg.Sender); err != nil {
-				log.Printf("[ERROR] Failed to ban user %d: %v", msg.Sender.ID, err)
+				logger.Error("Failed to ban user", err, logrus.Fields{
+					"user_id": msg.Sender.ID,
+					"chat_id": c.Chat().ID,
+				})
 			} else {
-				log.Printf("[DEBUG] Banned user %d for repeated violations", msg.Sender.ID)
+				logger.Info("Banned user for repeated violations", logrus.Fields{
+					"user_id":    msg.Sender.ID,
+					"violations": violationCount,
+				})
 
 				fh.adminHandler.ClearViolations(msg.Sender.ID)
 
