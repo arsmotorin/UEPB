@@ -72,29 +72,24 @@ func (fh *FeatureHandler) SendOrEdit(chat *tb.Chat, msg *tb.Message, text string
 
 // SetUserRestriction sets user permissions in chat
 func (fh *FeatureHandler) SetUserRestriction(chat *tb.Chat, user *tb.User, allowAll bool) {
-	var rights tb.Rights
 	if allowAll {
-		rights = tb.Rights{
-			CanSendMessages:   true,
-			CanSendAudios:     true,
-			CanSendDocuments:  true,
-			CanSendPhotos:     true,
-			CanSendVideos:     true,
-			CanSendVideoNotes: true,
-			CanSendVoiceNotes: true,
-			CanSendPolls:      true,
+		// Remove restrictions
+		if err := fh.bot.Restrict(chat, &tb.ChatMember{
+			User:            user,
+			RestrictedUntil: tb.Forever(),
+		}); err != nil {
+			log.Println("Unrestrict error:", err)
 		}
 	} else {
-		rights = tb.Rights{
+		rights := tb.Rights{
 			CanSendMessages: false,
 		}
-	}
-
-	if err := fh.bot.Restrict(chat, &tb.ChatMember{
-		User:   user,
-		Rights: rights,
-	}); err != nil {
-		log.Println("Restrict error:", err)
+		if err := fh.bot.Restrict(chat, &tb.ChatMember{
+			User:   user,
+			Rights: rights,
+		}); err != nil {
+			log.Println("Restrict error:", err)
+		}
 	}
 }
 
