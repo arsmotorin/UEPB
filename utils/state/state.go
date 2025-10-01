@@ -2,13 +2,15 @@ package state
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"UEPB/utils/interfaces"
+	"UEPB/utils/logger"
+
+	"github.com/sirupsen/logrus"
 )
 
 type State struct {
@@ -20,13 +22,17 @@ type State struct {
 
 // NewState creates a new State instance
 func NewState() interfaces.UserState {
-	// Create data dir with logging
+	// Create data dir
 	dataDir := "data"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		log.Printf("[ERROR] Failed to create data directory %s: %v", dataDir, err)
+		logger.Error("Failed to create data directory", err, logrus.Fields{
+			"directory": dataDir,
+		})
 	} else {
 		absPath, _ := filepath.Abs(dataDir)
-		log.Printf("[INFO] State data directory ensured: %s", absPath)
+		logger.Info("State data directory ensured", logrus.Fields{
+			"path": absPath,
+		})
 	}
 
 	file := "state.json"
@@ -36,7 +42,9 @@ func NewState() interfaces.UserState {
 	}
 
 	absFile, _ := filepath.Abs(file)
-	log.Printf("[INFO] State file path: %s", absFile)
+	logger.Info("State file path", logrus.Fields{
+		"path": absFile,
+	})
 
 	s := &State{
 		UserCorrect: make(map[int]int),
@@ -97,41 +105,58 @@ func (s *State) IsNewbie(id int) bool {
 func (s *State) save() {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
-		log.Printf("[ERROR] Failed to marshal state: %v", err)
+		logger.Error("Failed to marshal state", err)
 		return
 	}
 
 	absPath, _ := filepath.Abs(s.file)
-	log.Printf("[DEBUG] Saving state to: %s", absPath)
+	logger.Debug("Saving state", logrus.Fields{
+		"path": absPath,
+	})
 
 	if err := os.WriteFile(s.file, data, 0644); err != nil {
-		log.Printf("[ERROR] Failed to write state to %s: %v", absPath, err)
+		logger.Error("Failed to write state", err, logrus.Fields{
+			"path": absPath,
+		})
 	} else {
-		log.Printf("[DEBUG] Successfully saved state to: %s", absPath)
+		logger.Debug("Successfully saved state", logrus.Fields{
+			"path": absPath,
+		})
 	}
 }
 
 func (s *State) load() {
 	absPath, _ := filepath.Abs(s.file)
-	log.Printf("[INFO] Loading state from: %s", absPath)
+	logger.Info("Loading state", logrus.Fields{
+		"path": absPath,
+	})
 
 	data, err := os.ReadFile(s.file)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("[INFO] State file %s does not exist, will create when needed", absPath)
+			logger.Info("State file does not exist, will create when needed", logrus.Fields{
+				"path": absPath,
+			})
 			return
 		}
-		log.Printf("[ERROR] Failed to read state from %s: %v", absPath, err)
+		logger.Error("Failed to read state", err, logrus.Fields{
+			"path": absPath,
+		})
 		return
 	}
 
-	log.Printf("[DEBUG] Read %d bytes from state file: %s", len(data), absPath)
+	logger.Debug("Read state file", logrus.Fields{
+		"path": absPath,
+		"size": len(data),
+	})
 
 	// Preserve the file path before unmarshaling
 	file := s.file
 
 	if err := json.Unmarshal(data, s); err != nil {
-		log.Printf("[ERROR] Failed to unmarshal state from %s: %v", absPath, err)
+		logger.Error("Failed to unmarshal state", err, logrus.Fields{
+			"path": absPath,
+		})
 		// Reset to default values on error
 		s.UserCorrect = make(map[int]int)
 		s.NewbieMap = make(map[int]bool)
@@ -148,5 +173,9 @@ func (s *State) load() {
 		s.NewbieMap = make(map[int]bool)
 	}
 
-	log.Printf("[SUCCESS] Loaded state from: %s (users: %d, newbies: %d)", absPath, len(s.UserCorrect), len(s.NewbieMap))
+	logger.Info("Loaded state", logrus.Fields{
+		"path":    absPath,
+		"users":   len(s.UserCorrect),
+		"newbies": len(s.NewbieMap),
+	})
 }

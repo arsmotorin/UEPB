@@ -1,14 +1,14 @@
 package handlers
 
 import (
-	"log"
-
 	"UEPB/features"
 	"UEPB/utils/blacklist"
 	"UEPB/utils/interfaces"
+	"UEPB/utils/logger"
 	"UEPB/utils/quiz"
 	"UEPB/utils/state"
 
+	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
 )
 
@@ -101,6 +101,8 @@ func (h *Handler) setBotCommands() {
 	}
 
 	if err := h.bot.SetCommands(commands); err != nil {
-		log.Printf("[ERROR] Failed to set bot commands: %v", err)
+		logger.Error("Failed to set bot commands", err, logrus.Fields{
+			"commands_count": len(commands),
+		})
 	}
 }

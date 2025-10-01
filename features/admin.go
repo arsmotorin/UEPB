@@ -3,7 +3,6 @@ package features
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -11,7 +10,9 @@ import (
 
 	"UEPB/utils/admin"
 	"UEPB/utils/interfaces"
+	"UEPB/utils/logger"
 
+	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
 )
 
@@ -47,7 +48,9 @@ func NewAdminHandler(bot *tb.Bot, blacklist interfaces.BlacklistInterface, admin
 func (ah *AdminHandler) LogToAdmin(message string) {
 	adminChat := &tb.Chat{ID: ah.adminChatID}
 	if _, err := ah.bot.Send(adminChat, message); err != nil {
-		slog.Error("Failed to send admin log", "err", err)
+		logger.Error("Failed to send admin log", err, logrus.Fields{
+			"admin_chat_id": ah.adminChatID,
+		})
 	}
 }
 
@@ -55,7 +58,10 @@ func (ah *AdminHandler) LogToAdmin(message string) {
 func (ah *AdminHandler) IsAdmin(chat *tb.Chat, user *tb.User) bool {
 	member, err := ah.bot.ChatMemberOf(chat, user)
 	if err != nil {
-		slog.Error("Failed to check member rights", "err", err)
+		logger.Error("Failed to check member rights", err, logrus.Fields{
+			"chat_id": chat.ID,
+			"user_id": user.ID,
+		})
 		return false
 	}
 	return member.Role == tb.Administrator || member.Role == tb.Creator
@@ -81,7 +87,9 @@ func (ah *AdminHandler) DeleteAfter(m *tb.Message, d time.Duration) {
 	go func() {
 		time.Sleep(d)
 		if err := ah.bot.Delete(m); err != nil {
-			slog.Warn("Failed to delete message", "msgID", m.ID, "err", err)
+			logger.Warn("Failed to delete message", logrus.Fields{
+				"message_id": m.ID,
+			})
 		}
 	}()
 }
@@ -171,15 +179,23 @@ func (ah *AdminHandler) AllGroupIDs() []int64 {
 func (ah *AdminHandler) BanUserEverywhere(user *tb.User) {
 	groupIDs := ah.AllGroupIDs()
 	if len(groupIDs) == 0 {
-		slog.Warn("No group IDs registered, cannot perform global ban", "user", ah.GetUserDisplayName(user))
+		logger.Warn("No group IDs registered, cannot perform global ban", logrus.Fields{
+			"user": ah.GetUserDisplayName(user),
+		})
 	}
 	for _, chatID := range groupIDs {
 		chat := &tb.Chat{ID: chatID}
 		err := ah.BanUser(chat, user)
 		if err != nil {
-			slog.Error("Failed to ban user in group", "user", ah.GetUserDisplayName(user), "chatID", chatID, "err", err)
+			logger.Error("Failed to ban user in group", err, logrus.Fields{
+				"user":    ah.GetUserDisplayName(user),
+				"chat_id": chatID,
+			})
 		} else {
-			slog.Info("User banned in group", "user", ah.GetUserDisplayName(user), "chatID", chatID)
+			logger.Info("User banned in group", logrus.Fields{
+				"user":    ah.GetUserDisplayName(user),
+				"chat_id": chatID,
+			})
 		}
 	}
 }
@@ -229,11 +245,13 @@ func (ah *AdminHandler) ClearViolations(userID int64) {
 func (ah *AdminHandler) saveViolations() {
 	data, err := json.MarshalIndent(ah.violations, "", "  ")
 	if err != nil {
-		slog.Error("Failed to marshal violations", "err", err)
+		logger.Error("Failed to marshal violations", err)
 		return
 	}
 	if err := os.WriteFile(ah.violationsFile, data, 0644); err != nil {
-		slog.Error("Failed to write violations", "file", ah.violationsFile, "err", err)
+		logger.Error("Failed to write violations", err, logrus.Fields{
+			"file": ah.violationsFile,
+		})
 	}
 }
 
