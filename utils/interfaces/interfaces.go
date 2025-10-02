@@ -64,7 +64,7 @@ type FeatureHandlerInterface interface {
 	HandleStudent(c tb.Context) error
 	HandleGuest(c tb.Context) error
 	HandleAds(c tb.Context) error
-	HandlePing(c tb.Context) error
+	// HandlePing(c tb.Context) error
 	RegisterQuizHandlers(bot *tb.Bot)
 	CreateQuizHandler(i int, q QuestionInterface, btn tb.InlineButton) func(tb.Context) error
 	FilterMessage(c tb.Context) error

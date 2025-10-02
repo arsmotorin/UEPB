@@ -29,7 +29,7 @@ func NewBlacklist(file string) interfaces.BlacklistInterface {
 			"directory": dataDir,
 		})
 	} else {
-		// Get absolute path for logging
+		// Get an absolute path for logging
 		absPath, _ := filepath.Abs(dataDir)
 		logger.Info("Data directory ensured", logrus.Fields{
 			"path": absPath,
@@ -41,7 +41,7 @@ func NewBlacklist(file string) interfaces.BlacklistInterface {
 		file = "data/" + file
 	}
 
-	// Get absolute path for logging
+	// Get an absolute path for logging
 	absFile, _ := filepath.Abs(file)
 	logger.Info("Blacklist file path", logrus.Fields{
 		"path": absFile,
@@ -189,7 +189,7 @@ func (b *Blacklist) save() error {
 		"path": absPath,
 	})
 
-	// Check if directory exists
+	// Check if the directory exists
 	dir := filepath.Dir(b.file)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		logger.Warn("Directory does not exist, creating it", logrus.Fields{

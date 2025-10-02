@@ -210,7 +210,7 @@ func (fh *FeatureHandler) HandleAds(c tb.Context) error {
 }
 
 // HandlePing handles /ping command
-func (fh *FeatureHandler) HandlePing(c tb.Context) error {
+/*func (fh *FeatureHandler) HandlePing(c tb.Context) error {
 	start := time.Now()
 
 	// Send the response and measure time
@@ -238,7 +238,7 @@ func (fh *FeatureHandler) HandlePing(c tb.Context) error {
 	}
 
 	return nil
-}
+}*/
 
 // RegisterQuizHandlers registers all quiz button handlers
 func (fh *FeatureHandler) RegisterQuizHandlers(bot *tb.Bot) {
