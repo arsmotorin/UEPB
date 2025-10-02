@@ -81,7 +81,7 @@ func (h *Handler) Register() {
 	h.bot.Handle("/spamban", h.adminHandler.HandleSpamBan)
 
 	// Feature commands
-	// h.bot.Handle("/ping", h.featureHandler.HandlePing)
+	h.bot.Handle("/ping", h.featureHandler.RateLimit(h.featureHandler.HandlePing))
 
 	// Message filter
 	h.bot.Handle(tb.OnText, h.featureHandler.FilterMessage)
@@ -93,7 +93,7 @@ func (h *Handler) Register() {
 // setBotCommands sets bot commands
 func (h *Handler) setBotCommands() {
 	commands := []tb.Command{
-		// {Text: "ping", Description: "Проверить отклик бота"},
+		{Text: "ping", Description: "Проверить отклик бота"},
 		{Text: "banword", Description: "Добавить запрещённое слово"},
 		{Text: "unbanword", Description: "Удалить запрещённое слово"},
 		{Text: "listbanword", Description: "Показать список запрещённых слов"},

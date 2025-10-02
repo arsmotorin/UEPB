@@ -3,6 +3,7 @@ package features
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"UEPB/utils/interfaces"
@@ -20,6 +21,8 @@ type FeatureHandler struct {
 	blacklist   interfaces.BlacklistInterface
 	adminChatID int64
 	violations  map[int64]int
+	rlMu        sync.Mutex
+	rateLimit   map[int64]time.Time
 	Btns        struct {
 		Student, Guest, Ads tb.InlineButton
 	}
@@ -35,10 +38,13 @@ func NewFeatureHandler(bot *tb.Bot, state interfaces.UserState, quiz interfaces.
 		blacklist:    blacklist,
 		adminChatID:  adminChatID,
 		violations:   violations,
+		rateLimit:    make(map[int64]time.Time),
 		Btns:         btns,
 		adminHandler: adminHandler,
 	}
 }
+
+// GLOBAL FEATURES
 
 // OnlyNewbies middleware to restrict handlers to newbies only
 func (fh *FeatureHandler) OnlyNewbies(handler func(tb.Context) error) func(tb.Context) error {
@@ -55,6 +61,36 @@ func (fh *FeatureHandler) OnlyNewbies(handler func(tb.Context) error) func(tb.Co
 		return handler(c)
 	}
 }
+
+// RateLimit middleware to limit command usage to once per second per user
+func (fh *FeatureHandler) RateLimit(handler func(tb.Context) error) func(tb.Context) error {
+	return func(c tb.Context) error {
+		if c.Sender() == nil {
+			return handler(c)
+		}
+		uid := c.Sender().ID
+		fh.rlMu.Lock()
+		last, ok := fh.rateLimit[uid]
+		now := time.Now()
+		if ok && now.Sub(last) < time.Second {
+			fh.rateLimit[uid] = now
+			fh.rlMu.Unlock()
+			if c.Chat() != nil {
+				warnMsg, _ := fh.bot.Send(c.Chat(), "⏱️ Пожалуйста, не чаще одной команды в секунду.")
+				if fh.adminHandler != nil {
+					fh.adminHandler.DeleteAfter(warnMsg, 5*time.Second)
+				}
+			}
+			return nil
+		}
+		// Reset rate limit
+		fh.rateLimit[uid] = now
+		fh.rlMu.Unlock()
+		return handler(c)
+	}
+}
+
+// MAIN FEATURES
 
 // SendOrEdit sends a new message or edits an existing one
 func (fh *FeatureHandler) SendOrEdit(chat *tb.Chat, msg *tb.Message, text string, rm *tb.ReplyMarkup) *tb.Message {
@@ -190,7 +226,7 @@ func (fh *FeatureHandler) HandleStudent(c tb.Context) error {
 func (fh *FeatureHandler) HandleGuest(c tb.Context) error {
 	fh.SetUserRestriction(c.Chat(), c.Sender(), true)
 	fh.state.ClearNewbie(int(c.Sender().ID))
-	msg := fh.SendOrEdit(c.Chat(), c.Message(), "✅ Теперь можно писать в чат. Задай интересующий вопрос.", nil)
+	msg := fh.SendOrEdit(c.Chat(), c.Message(), "✅ Теперь можно писать в чат. Задай свой вопрос.", nil)
 	fh.adminHandler.DeleteAfter(msg, 5*time.Second)
 	return nil
 }
@@ -209,11 +245,28 @@ func (fh *FeatureHandler) HandleAds(c tb.Context) error {
 	return nil
 }
 
-// HandlePing handles /ping command
-/*func (fh *FeatureHandler) HandlePing(c tb.Context) error {
+// HandlePing handles /ping command in private chat
+func (fh *FeatureHandler) HandlePing(c tb.Context) error {
 	start := time.Now()
+	if c.Message() == nil || c.Chat() == nil || c.Sender() == nil {
+		return nil
+	}
 
-	// Send the response and measure time
+	if c.Chat().Type != tb.ChatPrivate {
+		warnMsg, err := fh.bot.Send(c.Chat(), "ℹ️ Команда /ping доступна только в личных сообщениях с ботом.")
+		if err != nil {
+			logger.Error("Failed to send ping warning in group", err, logrus.Fields{
+				"chat_id": c.Chat().ID,
+				"user_id": c.Sender().ID,
+			})
+			return err
+		}
+		if fh.adminHandler != nil {
+			fh.adminHandler.DeleteAfter(warnMsg, 5*time.Second)
+		}
+		return nil
+	}
+
 	msg, err := fh.bot.Send(c.Chat(), "🏓 Понг!")
 	if err != nil {
 		logger.Error("Failed to send ping response", err, logrus.Fields{
@@ -223,11 +276,9 @@ func (fh *FeatureHandler) HandleAds(c tb.Context) error {
 		return err
 	}
 
-	// Calculate response time
 	responseTime := time.Since(start)
 	responseMs := int(responseTime.Nanoseconds() / 1000000) // Convert to milliseconds
 
-	// Edit the message with response time
 	finalText := fmt.Sprintf("🏓 Понг! (%d мс)", responseMs)
 	_, err = fh.bot.Edit(msg, finalText)
 	if err != nil {
@@ -238,7 +289,7 @@ func (fh *FeatureHandler) HandleAds(c tb.Context) error {
 	}
 
 	return nil
-}*/
+}
 
 // RegisterQuizHandlers registers all quiz button handlers
 func (fh *FeatureHandler) RegisterQuizHandlers(bot *tb.Bot) {
@@ -271,7 +322,7 @@ func (fh *FeatureHandler) CreateQuizHandler(i int, q interfaces.QuestionInterfac
 			fh.SetUserRestriction(c.Chat(), c.Sender(), true)
 			fh.state.ClearNewbie(userID)
 			msg := fh.SendOrEdit(c.Chat(), c.Message(), "✅ Верификация пройдена! Теперь можно писать в чат.", nil)
-			fh.adminHandler.DeleteAfter(msg, 3*time.Second)
+			fh.adminHandler.DeleteAfter(msg, 5*time.Second)
 
 			// Log successful verification to admin chat
 			logMsg := fmt.Sprintf("✅ Пользователь успешно прошёл верификацию.\n\n"+
@@ -371,7 +422,7 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 		} else {
 			// Warning if it's their first violation
 			warningMsg, _ := fh.bot.Send(c.Chat(), fmt.Sprintf("⚠️ %s, сообщение удалено. При повторном нарушении будет бан.", fh.adminHandler.GetUserDisplayName(msg.Sender)))
-			fh.adminHandler.DeleteAfter(warningMsg, 15*time.Second)
+			fh.adminHandler.DeleteAfter(warningMsg, 5*time.Second)
 
 			// Log to admin chat
 			logMsg := fmt.Sprintf("⚠️ Обнаружено нарушение.\n\n"+
