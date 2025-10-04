@@ -542,7 +542,7 @@ func (fh *FeatureHandler) fetchEventsFromWebsite() error {
 func (fh *FeatureHandler) formatEventText(event EventData, index int, total int) string {
 	var result strings.Builder
 
-	result.WriteString(fmt.Sprintf("🗓 *%s*\n\n", event.Title))
+	result.WriteString(fmt.Sprintf("📰 %s\n\n", event.Title))
 
 	if event.Description != "" {
 		desc := strings.ReplaceAll(event.Description, "\n\n\n", "\n\n")
@@ -622,7 +622,7 @@ func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
 		InlineKeyboard: [][]tb.InlineButton{{nextBtn}},
 	}
 
-	fh.bot.Edit(statusMsg, eventText, markup)
+	fh.bot.Edit(statusMsg, eventText, markup, tb.ModeMarkdown)
 
 	logger.Info("Event displayed", logrus.Fields{
 		"user":        fh.adminHandler.GetUserDisplayName(c.Sender()),
@@ -682,7 +682,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 		InlineKeyboard: [][]tb.InlineButton{buttons},
 	}
 
-	fh.bot.Edit(c.Callback().Message, eventText, markup)
+	fh.bot.Edit(c.Callback().Message, eventText, markup, tb.ModeMarkdown)
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
 
@@ -732,6 +732,6 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 		InlineKeyboard: [][]tb.InlineButton{buttons},
 	}
 
-	fh.bot.Edit(c.Callback().Message, eventText, markup)
+	fh.bot.Edit(c.Callback().Message, eventText, markup, tb.ModeMarkdown)
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
