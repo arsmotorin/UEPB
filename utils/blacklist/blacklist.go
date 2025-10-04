@@ -20,7 +20,7 @@ type Blacklist struct {
 	file    string
 }
 
-// NewBlacklist creates a new blacklist
+// NewBlacklist creates a new blocklist
 func NewBlacklist(file string) interfaces.BlacklistInterface {
 	// Create data dir
 	dataDir := "data"

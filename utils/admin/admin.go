@@ -10,7 +10,7 @@ import (
 	tb "gopkg.in/telebot.v4"
 )
 
-// IsAdminOrWarn checks if user is admin or warns if not
+// IsAdminOrWarn checks if the user is admin or warns if not
 func IsAdminOrWarn(ah interfaces.AdminHandlerInterface, c tb.Context, warn string) bool {
 	if c.Message() == nil || c.Sender() == nil || !ah.IsAdmin(c.Chat(), c.Sender()) {
 		ReplyAndDelete(ah, c, warn, 10*time.Second)

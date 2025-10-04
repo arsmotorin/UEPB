@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -158,7 +159,7 @@ func (ah *AdminHandler) HandleListBan(c tb.Context) error {
 	}
 	phrases := ah.blacklist.List()
 	if len(phrases) == 0 {
-		ah.bot.Send(c.Chat(), "📭 Список пуст.")
+		_, _ = ah.bot.Send(c.Chat(), "📭 Список пуст.")
 		return nil
 	}
 	var sb strings.Builder
@@ -166,7 +167,7 @@ func (ah *AdminHandler) HandleListBan(c tb.Context) error {
 	for i, p := range phrases {
 		sb.WriteString(fmt.Sprintf("%d. `%s`\n", i+1, strings.Join(p, " ")))
 	}
-	ah.bot.Send(c.Chat(), sb.String(), tb.ModeMarkdown)
+	_, _ = ah.bot.Send(c.Chat(), sb.String(), tb.ModeMarkdown)
 	return nil
 }
 
@@ -237,7 +238,7 @@ func (ah *AdminHandler) HandleSpamBan(c tb.Context) error {
 	return nil
 }
 
-// Violation management
+// AddViolation adds a violation for a user
 func (ah *AdminHandler) AddViolation(userID int64) {
 	ah.violationsMu.Lock()
 	ah.violations[userID]++
@@ -291,7 +292,7 @@ func (ah *AdminHandler) Bot() *tb.Bot {
 
 // fetchAndCacheEvents fetches events from the website and caches them
 func (ah *AdminHandler) fetchAndCacheEvents() error {
-	// Create HTTP client with custom transport to skip certificate verification
+	// Create an HTTP client with custom transport to skip certificate verification
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -309,7 +310,9 @@ func (ah *AdminHandler) fetchAndCacheEvents() error {
 		})
 		return err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
 
 	if resp.StatusCode != 200 {
 		logger.Error("Non-200 status code", nil, logrus.Fields{
@@ -328,7 +331,7 @@ func (ah *AdminHandler) fetchAndCacheEvents() error {
 		return err
 	}
 
-	// Find current month
+	// Find the current month
 	currentMonth := strings.TrimSpace(doc.Find(".eventsList__monthTitle").First().Text())
 
 	// Parse all events
@@ -457,7 +460,7 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 	if !cacheValid {
 		err := ah.fetchAndCacheEvents()
 		if err != nil {
-			ah.bot.Edit(statusMsg, "❌ Возникла ошибка при загрузке страницы.")
+			_, _ = ah.bot.Edit(statusMsg, "❌ Возникла ошибка при загрузке страницы.")
 			return nil
 		}
 	}
@@ -467,7 +470,7 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 	defer ah.eventsCacheMu.RUnlock()
 
 	if len(ah.eventsCache) == 0 {
-		ah.bot.Edit(statusMsg, "❌ Событий нет.")
+		_, _ = ah.bot.Edit(statusMsg, "❌ Событий нет.")
 		return nil
 	}
 
@@ -488,7 +491,7 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 	}
 
 	// Send the event
-	ah.bot.Edit(statusMsg, eventText, markup)
+	_, _ = ah.bot.Edit(statusMsg, eventText, markup)
 
 	logger.Info("Event displayed", logrus.Fields{
 		"admin":       ah.GetUserDisplayName(c.Sender()),
@@ -553,7 +556,7 @@ func (ah *AdminHandler) HandlePrevEvent(c tb.Context) error {
 	}
 
 	// Edit message
-	ah.bot.Edit(c.Callback().Message, eventText, markup)
+	_, _ = ah.bot.Edit(c.Callback().Message, eventText, markup)
 	return ah.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
 
@@ -608,6 +611,6 @@ func (ah *AdminHandler) HandleNextEvent(c tb.Context) error {
 	}
 
 	// Edit message
-	ah.bot.Edit(c.Callback().Message, eventText, markup)
+	_, _ = ah.bot.Edit(c.Callback().Message, eventText, markup)
 	return ah.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }

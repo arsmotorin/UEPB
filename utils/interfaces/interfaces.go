@@ -29,7 +29,7 @@ type QuizInterface interface {
 	GetQuestions() []QuestionInterface
 }
 
-// BlacklistInterface interface for blacklist functionality
+// BlacklistInterface interface for blocklist functionality
 type BlacklistInterface interface {
 	AddPhrase(words []string)
 	RemovePhrase(words []string) bool

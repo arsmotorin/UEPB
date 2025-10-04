@@ -18,7 +18,7 @@ func main() {
 	logger.Info("Bot is starting...")
 
 	// Load .env file
-	godotenv.Load()
+	_ = godotenv.Load()
 	token := os.Getenv("BOT_TOKEN")
 	if token == "" {
 		logger.Logger.Fatal("BOT_TOKEN is required in .env file")

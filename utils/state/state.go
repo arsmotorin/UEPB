@@ -17,7 +17,7 @@ type State struct {
 	mu          sync.RWMutex
 	UserCorrect map[int]int  `json:"user_correct"`
 	NewbieMap   map[int]bool `json:"is_newbie"`
-	file        string       `json:"-"`
+	File        string       `json:"-"`
 }
 
 // NewState creates a new State instance
@@ -49,7 +49,7 @@ func NewState() interfaces.UserState {
 	s := &State{
 		UserCorrect: make(map[int]int),
 		NewbieMap:   make(map[int]bool),
-		file:        file,
+		File:        file,
 	}
 	s.load()
 	return s
@@ -109,12 +109,12 @@ func (s *State) save() {
 		return
 	}
 
-	absPath, _ := filepath.Abs(s.file)
+	absPath, _ := filepath.Abs(s.File)
 	logger.Debug("Saving state", logrus.Fields{
 		"path": absPath,
 	})
 
-	if err := os.WriteFile(s.file, data, 0644); err != nil {
+	if err := os.WriteFile(s.File, data, 0644); err != nil {
 		logger.Error("Failed to write state", err, logrus.Fields{
 			"path": absPath,
 		})
@@ -126,12 +126,12 @@ func (s *State) save() {
 }
 
 func (s *State) load() {
-	absPath, _ := filepath.Abs(s.file)
+	absPath, _ := filepath.Abs(s.File)
 	logger.Info("Loading state", logrus.Fields{
 		"path": absPath,
 	})
 
-	data, err := os.ReadFile(s.file)
+	data, err := os.ReadFile(s.File)
 	if err != nil {
 		if os.IsNotExist(err) {
 			logger.Info("State file does not exist, will create when needed", logrus.Fields{
@@ -150,8 +150,8 @@ func (s *State) load() {
 		"size": len(data),
 	})
 
-	// Preserve the file path before unmarshaling
-	file := s.file
+	// Preserve the file path before unmarshalling
+	file := s.File
 
 	if err := json.Unmarshal(data, s); err != nil {
 		logger.Error("Failed to unmarshal state", err, logrus.Fields{
@@ -162,8 +162,8 @@ func (s *State) load() {
 		s.NewbieMap = make(map[int]bool)
 	}
 
-	// Restore file path after unmarshaling
-	s.file = file
+	// Restore the file path after unmarshalling
+	s.File = file
 
 	// Initialize maps if nil
 	if s.UserCorrect == nil {
