@@ -770,7 +770,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 
 	data := c.Callback().Data
 	var currentIndex int
-	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
+	_, err := fmt.Sscanf(data, "nav_%d", &currentIndex)
 	if err != nil {
 		return nil
 	}
@@ -799,7 +799,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 		prevBtn := tb.InlineButton{
 			Unique: "prev_event",
 			Text:   "⬅️ Назад",
-			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
+			Data:   fmt.Sprintf("nav_%d", prevIndex),
 		}
 		navButtons = append(navButtons, prevBtn)
 	}
@@ -807,7 +807,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 		nextBtn := tb.InlineButton{
 			Unique: "next_event",
 			Text:   "Далее ➡️",
-			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
+			Data:   fmt.Sprintf("nav_%d", prevIndex),
 		}
 		navButtons = append(navButtons, nextBtn)
 	}
@@ -815,7 +815,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 	interestedBtn := tb.InlineButton{
 		Unique: "event_interested",
 		Text:   "Интересует 🔔",
-		Data:   fmt.Sprintf("event_int_%s", event.GetEventID()),
+		Data:   fmt.Sprintf("int_%s", event.GetEventID()),
 	}
 
 	markup := &tb.ReplyMarkup{
@@ -853,7 +853,7 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 
 	data := c.Callback().Data
 	var currentIndex int
-	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
+	_, err := fmt.Sscanf(data, "nav_%d", &currentIndex)
 	if err != nil {
 		return nil
 	}
@@ -879,7 +879,7 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 		prevBtn := tb.InlineButton{
 			Unique: "prev_event",
 			Text:   "⬅️ Назад",
-			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
+			Data:   fmt.Sprintf("nav_%d", nextIndex),
 		}
 		navButtons = append(navButtons, prevBtn)
 	}
@@ -887,7 +887,7 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 		nextBtn := tb.InlineButton{
 			Unique: "next_event",
 			Text:   "Далее ➡️",
-			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
+			Data:   fmt.Sprintf("nav_%d", nextIndex),
 		}
 		navButtons = append(navButtons, nextBtn)
 	}
@@ -895,7 +895,7 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 	interestedBtn := tb.InlineButton{
 		Unique: "event_interested",
 		Text:   "Интересует 🔔",
-		Data:   fmt.Sprintf("event_int_%s", event.GetEventID()),
+		Data:   fmt.Sprintf("int_%s", event.GetEventID()),
 	}
 
 	markup := &tb.ReplyMarkup{
