@@ -3,6 +3,7 @@ package features
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"UEPB/utils/interfaces"
 	"UEPB/utils/logger"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
 )
@@ -271,4 +273,149 @@ func (ah *AdminHandler) loadViolations() {
 // Bot returns the bot instance
 func (ah *AdminHandler) Bot() *tb.Bot {
 	return ah.bot
+}
+
+// HandleTestParsing handles the /testparsing command
+func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
+	if !admin.IsAdminOrWarn(ah, c, "⛔ Команда /testparsing доступна только администрации.") {
+		return nil
+	}
+
+	// Send the initial message
+	statusMsg, _ := ah.bot.Send(c.Chat(), "🔄 Парсинг...")
+
+	// Parse the website
+	url := "https://ue.poznan.pl/wydarzenia/"
+	resp, err := http.Get(url)
+	if err != nil {
+		logger.Error("Failed to fetch events page", err, logrus.Fields{
+			"url": url,
+		})
+		ah.bot.Edit(statusMsg, "❌ Ошибка при загрузке страницы.")
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		logger.Error("Non-200 status code", nil, logrus.Fields{
+			"url":    url,
+			"status": resp.StatusCode,
+		})
+		ah.bot.Edit(statusMsg, fmt.Sprintf("❌ Ошибка: HTTP статус %d", resp.StatusCode))
+		return nil
+	}
+
+	// Parse HTML
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		logger.Error("Failed to parse HTML", err, logrus.Fields{
+			"url": url,
+		})
+		ah.bot.Edit(statusMsg, "❌ Ошибка при парсинге HTML.")
+		return nil
+	}
+
+	// Extract text content
+	var result strings.Builder
+	result.WriteString("📰 *События на сайте UE Познаń:*\n\n")
+
+	// Find current month
+	currentMonth := strings.TrimSpace(doc.Find(".eventsList__monthTitle").First().Text())
+	if currentMonth != "" {
+		result.WriteString(fmt.Sprintf("📅 *%s*\n\n", currentMonth))
+	}
+
+	// Find all event items
+	eventCount := 0
+	doc.Find(".eventsList__event").Each(func(i int, s *goquery.Selection) {
+		if eventCount >= 10 { // Limit to first 10 events
+			return
+		}
+
+		// Extract event date
+		day := strings.TrimSpace(s.Find(".eventsList__eventDay").Text())
+		eventTime := strings.TrimSpace(s.Find(".eventsList__eventTime").Text())
+
+		// Extract event category
+		category := strings.TrimSpace(s.Find(".eventsList__eventCategory").Text())
+
+		// Extract event title
+		title := strings.TrimSpace(s.Find(".eventsList__eventTitle").Text())
+
+		// Extract event excerpt (short description)
+		excerpt := strings.TrimSpace(s.Find(".eventsList__eventExcerpt").Text())
+
+		if title != "" {
+			eventCount++
+
+			// Format date and time
+			dateTimeStr := ""
+			if day != "" {
+				dateTimeStr = fmt.Sprintf("📅 %s", day)
+				if eventTime != "" {
+					dateTimeStr += fmt.Sprintf(" | ⏰ %s", eventTime)
+				}
+			}
+
+			if dateTimeStr != "" {
+				result.WriteString(fmt.Sprintf("%s\n", dateTimeStr))
+			}
+
+			// Add category if available
+			if category != "" {
+				result.WriteString(fmt.Sprintf("🏷 %s\n", category))
+			}
+
+			// Add title
+			result.WriteString(fmt.Sprintf("*%d. %s*\n", eventCount, title))
+
+			// Add excerpt if available and not too long
+			if excerpt != "" {
+				if len(excerpt) > 150 {
+					excerpt = excerpt[:150] + "..."
+				}
+				result.WriteString(fmt.Sprintf("%s\n", excerpt))
+			}
+
+			result.WriteString("\n")
+		}
+	})
+
+	// If no events found
+	if eventCount == 0 {
+		result.WriteString("❌ События не найдены на странице.\n\n")
+
+		// Try to get page title as fallback
+		pageTitle := strings.TrimSpace(doc.Find("title").First().Text())
+		if pageTitle != "" {
+			result.WriteString(fmt.Sprintf("📌 Заголовок страницы: %s", pageTitle))
+		}
+	} else {
+		result.WriteString(fmt.Sprintf("_Найдено событий: %d_\n", eventCount))
+		result.WriteString(fmt.Sprintf("🔗 [Посмотреть все события](%s)", url))
+	}
+
+	finalText := result.String()
+
+	// Telegram message limit is 4096 characters
+	if len(finalText) > 512 {
+		finalText = finalText[:512] + "\n\n..."
+	}
+
+	// Send the result
+	ah.bot.Edit(statusMsg, finalText, tb.ModeMarkdown)
+
+	// Log to admin
+	ah.LogToAdmin(fmt.Sprintf("🔍 Парсинг выполнен\n\nАдмин: %s\nURL: %s\nНайдено событий: %d",
+		ah.GetUserDisplayName(c.Sender()),
+		url,
+		eventCount))
+
+	logger.Info("Website parsing completed", logrus.Fields{
+		"url":         url,
+		"admin":       ah.GetUserDisplayName(c.Sender()),
+		"event_count": eventCount,
+	})
+
+	return nil
 }

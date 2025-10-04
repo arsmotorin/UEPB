@@ -48,6 +48,7 @@ type AdminHandlerInterface interface {
 	HandleUnban(c tb.Context) error
 	HandleListBan(c tb.Context) error
 	HandleSpamBan(c tb.Context) error
+	HandleTestParsing(c tb.Context) error
 	AddViolation(userID int64)
 	GetViolations(userID int64) int
 	ClearViolations(userID int64)
@@ -64,11 +65,8 @@ type FeatureHandlerInterface interface {
 	HandleStudent(c tb.Context) error
 	HandleGuest(c tb.Context) error
 	HandleAds(c tb.Context) error
-	// HandlePing handles the /ping command
 	HandlePing(c tb.Context) error
-	// RateLimit wraps a handler to allow 1 command per second per user
 	RateLimit(handler func(tb.Context) error) func(tb.Context) error
-	// HandlePing(c tb.Context) error
 	RegisterQuizHandlers(bot *tb.Bot)
 	CreateQuizHandler(i int, q QuestionInterface, btn tb.InlineButton) func(tb.Context) error
 	FilterMessage(c tb.Context) error

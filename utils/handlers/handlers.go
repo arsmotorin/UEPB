@@ -79,6 +79,7 @@ func (h *Handler) Register() {
 	h.bot.Handle("/unbanword", h.adminHandler.HandleUnban)
 	h.bot.Handle("/listbanword", h.adminHandler.HandleListBan)
 	h.bot.Handle("/spamban", h.adminHandler.HandleSpamBan)
+	h.bot.Handle("/testparsing", h.adminHandler.HandleTestParsing)
 
 	// Feature commands
 	h.bot.Handle("/ping", h.featureHandler.RateLimit(h.featureHandler.HandlePing))
@@ -98,6 +99,7 @@ func (h *Handler) setBotCommands() {
 		{Text: "unbanword", Description: "Удалить запрещённое слово"},
 		{Text: "listbanword", Description: "Показать список запрещённых слов"},
 		{Text: "spamban", Description: "Забанить пользователя за спам"},
+		{Text: "testparsing", Description: "Узнать о событиях"},
 	}
 
 	if err := h.bot.SetCommands(commands); err != nil {
