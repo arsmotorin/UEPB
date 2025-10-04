@@ -71,6 +71,12 @@ func (h *Handler) Register() {
 	h.bot.Handle(&h.Btns.Guest, h.featureHandler.OnlyNewbies(h.featureHandler.HandleGuest))
 	h.bot.Handle(&h.Btns.Ads, h.featureHandler.OnlyNewbies(h.featureHandler.HandleAds))
 
+	// Event navigation buttons
+	prevEventBtn := tb.InlineButton{Unique: "prev_event"}
+	nextEventBtn := tb.InlineButton{Unique: "next_event"}
+	h.bot.Handle(&prevEventBtn, h.adminHandler.HandlePrevEvent)
+	h.bot.Handle(&nextEventBtn, h.adminHandler.HandleNextEvent)
+
 	// Quiz handlers
 	h.featureHandler.RegisterQuizHandlers(h.bot)
 

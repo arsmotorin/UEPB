@@ -28,6 +28,19 @@ type AdminHandler struct {
 	violationsFile string
 	groupIDs       map[int64]struct{}
 	groupMu        sync.RWMutex
+	eventsCache    []EventData
+	eventsCacheMu  sync.RWMutex
+	cacheTime      time.Time
+}
+
+// EventData stores parsed event information
+type EventData struct {
+	Day         string
+	Month       string
+	Time        string
+	Category    string
+	Title       string
+	Description string
 }
 
 // NewAdminHandler creates a new admin handler
@@ -276,16 +289,9 @@ func (ah *AdminHandler) Bot() *tb.Bot {
 	return ah.bot
 }
 
-// HandleTestParsing handles the /testparsing command
-func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
-	if !admin.IsAdminOrWarn(ah, c, "⛔ Команда /testparsing доступна только администрации.") {
-		return nil
-	}
-
-	// Send the initial message
-	statusMsg, _ := ah.bot.Send(c.Chat(), "🔄 Парсинг...")
-
-	// Create HTTP client with custom transport
+// fetchAndCacheEvents fetches events from the website and caches them
+func (ah *AdminHandler) fetchAndCacheEvents() error {
+	// Create HTTP client with custom transport to skip certificate verification
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -301,8 +307,7 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 		logger.Error("Failed to fetch events page", err, logrus.Fields{
 			"url": url,
 		})
-		ah.bot.Edit(statusMsg, "❌ Ошибка при загрузке страницы.")
-		return nil
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -311,8 +316,7 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 			"url":    url,
 			"status": resp.StatusCode,
 		})
-		ah.bot.Edit(statusMsg, fmt.Sprintf("❌ Ошибка: HTTP статус %d", resp.StatusCode))
-		return nil
+		return fmt.Errorf("HTTP status %d", resp.StatusCode)
 	}
 
 	// Parse HTML
@@ -321,27 +325,15 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 		logger.Error("Failed to parse HTML", err, logrus.Fields{
 			"url": url,
 		})
-		ah.bot.Edit(statusMsg, "❌ Ошибка при парсинге HTML.")
-		return nil
+		return err
 	}
-
-	// Extract text content
-	var result strings.Builder
-	result.WriteString("📰 *События на сайте UE Poznań:*\n\n")
 
 	// Find current month
 	currentMonth := strings.TrimSpace(doc.Find(".eventsList__monthTitle").First().Text())
-	if currentMonth != "" {
-		result.WriteString(fmt.Sprintf("📅 *%s*\n\n", currentMonth))
-	}
 
-	// Find all event items
-	eventCount := 0
+	// Parse all events
+	var events []EventData
 	doc.Find(".eventsList__event").Each(func(i int, s *goquery.Selection) {
-		if eventCount >= 10 { // Limit to first 10 events
-			return
-		}
-
 		// Extract event date
 		day := strings.TrimSpace(s.Find(".eventsList__eventDay").Text())
 		eventTime := strings.TrimSpace(s.Find(".eventsList__eventTime").Text())
@@ -352,80 +344,246 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 		// Extract event title
 		title := strings.TrimSpace(s.Find(".eventsList__eventTitle").Text())
 
-		// Extract event excerpt (short description)
-		excerpt := strings.TrimSpace(s.Find(".eventsList__eventExcerpt").Text())
+		// Extract full description from eventsList__eventFullText
+		fullText := strings.TrimSpace(s.Find(".eventsList__eventFullText .wysiwyg").Text())
+
+		// If no full text, use excerpt
+		if fullText == "" {
+			fullText = strings.TrimSpace(s.Find(".eventsList__eventExcerpt").Text())
+		}
 
 		if title != "" {
-			eventCount++
-
-			// Format date and time
-			dateTimeStr := ""
-			if day != "" {
-				dateTimeStr = fmt.Sprintf("📅 %s", day)
-				if eventTime != "" {
-					dateTimeStr += fmt.Sprintf(" | ⏰ %s", eventTime)
-				}
-			}
-
-			if dateTimeStr != "" {
-				result.WriteString(fmt.Sprintf("%s\n", dateTimeStr))
-			}
-
-			// Add category if available
-			if category != "" {
-				result.WriteString(fmt.Sprintf("🏷 %s\n", category))
-			}
-
-			// Add title
-			result.WriteString(fmt.Sprintf("*%d. %s*\n", eventCount, title))
-
-			// Add excerpt if available and not too long
-			if excerpt != "" {
-				if len(excerpt) > 150 {
-					excerpt = excerpt[:150] + "..."
-				}
-				result.WriteString(fmt.Sprintf("%s\n", excerpt))
-			}
-
-			result.WriteString("\n")
+			events = append(events, EventData{
+				Day:         day,
+				Month:       currentMonth,
+				Time:        eventTime,
+				Category:    category,
+				Title:       title,
+				Description: fullText,
+			})
 		}
 	})
 
-	// If no events found
-	if eventCount == 0 {
-		result.WriteString("❌ События не найдены на странице.\n\n")
+	// Update cache
+	ah.eventsCacheMu.Lock()
+	ah.eventsCache = events
+	ah.cacheTime = time.Now()
+	ah.eventsCacheMu.Unlock()
 
-		// Try to get page title as fallback
-		pageTitle := strings.TrimSpace(doc.Find("title").First().Text())
-		if pageTitle != "" {
-			result.WriteString(fmt.Sprintf("📌 Заголовок страницы: %s", pageTitle))
-		}
-	} else {
-		result.WriteString(fmt.Sprintf("_Найдено событий: %d_\n", eventCount))
-		result.WriteString(fmt.Sprintf("🔗 [Посмотреть все события](%s)", url))
-	}
-
-	finalText := result.String()
-
-	// Telegram message limit is 4096 characters
-	if len(finalText) > 512 {
-		finalText = finalText[:512] + "\n\n..."
-	}
-
-	// Send the result
-	ah.bot.Edit(statusMsg, finalText, tb.ModeMarkdown)
-
-	// Log to admin
-	ah.LogToAdmin(fmt.Sprintf("🔍 Парсинг выполнен\n\nАдмин: %s\nURL: %s\nНайдено событий: %d",
-		ah.GetUserDisplayName(c.Sender()),
-		url,
-		eventCount))
-
-	logger.Info("Website parsing completed", logrus.Fields{
-		"url":         url,
-		"admin":       ah.GetUserDisplayName(c.Sender()),
-		"event_count": eventCount,
+	logger.Info("Events cached successfully", logrus.Fields{
+		"count": len(events),
 	})
 
 	return nil
+}
+
+// formatEvent formats a single event in the specified format
+func (ah *AdminHandler) formatEvent(event EventData, index int, total int) string {
+	var result strings.Builder
+
+	// Title
+	result.WriteString(fmt.Sprintf("🗓 *%s*\n\n", event.Title))
+
+	// Description
+	if event.Description != "" {
+		// Clean up description
+		desc := strings.ReplaceAll(event.Description, "\n\n\n", "\n\n")
+		desc = strings.TrimSpace(desc)
+		result.WriteString(fmt.Sprintf("%s\n\n", desc))
+	}
+
+	// Date and time
+	if event.Day != "" {
+		timeStr := ""
+		if event.Time != "" {
+			timeStr = event.Time
+		}
+
+		// Extract month name from Month field (e.g., "Październik 2025")
+		monthName := event.Month
+		if strings.Contains(monthName, " ") {
+			parts := strings.Split(monthName, " ")
+			monthName = strings.ToLower(parts[0])
+		}
+
+		result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", event.Day, monthName, timeStr))
+	}
+
+	// Footer with pagination
+	result.WriteString(fmt.Sprintf("\n\n_Wydarzenie %d z %d_", index+1, total))
+
+	return result.String()
+}
+
+// HandleTestParsing handles the /testparsing command
+func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
+	if !admin.IsAdminOrWarn(ah, c, "⛔ Команда /testparsing доступна только для администраторов.") {
+		return nil
+	}
+
+	// Send initial message
+	statusMsg, _ := ah.bot.Send(c.Chat(), "🔄 Загрузка...")
+
+	// Check if cache is valid (less than 5 minutes old)
+	ah.eventsCacheMu.RLock()
+	cacheValid := time.Since(ah.cacheTime) < 5*time.Minute && len(ah.eventsCache) > 0
+	ah.eventsCacheMu.RUnlock()
+
+	// Fetch events if cache is invalid
+	if !cacheValid {
+		err := ah.fetchAndCacheEvents()
+		if err != nil {
+			ah.bot.Edit(statusMsg, "❌ Возникла ошибка при загрузке страницы.")
+			return nil
+		}
+	}
+
+	// Get first event
+	ah.eventsCacheMu.RLock()
+	defer ah.eventsCacheMu.RUnlock()
+
+	if len(ah.eventsCache) == 0 {
+		ah.bot.Edit(statusMsg, "❌ Событий нет.")
+		return nil
+	}
+
+	// Format and display first event
+	eventText := ah.formatEvent(ah.eventsCache[0], 0, len(ah.eventsCache))
+
+	// Create navigation buttons
+	nextBtn := tb.InlineButton{
+		Unique: "next_event",
+		Text:   "Далее ➡️",
+		Data:   "event_nav_1",
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{
+			{nextBtn},
+		},
+	}
+
+	// Send the event
+	ah.bot.Edit(statusMsg, eventText, markup)
+
+	logger.Info("Event displayed", logrus.Fields{
+		"admin":       ah.GetUserDisplayName(c.Sender()),
+		"event_index": 0,
+		"total":       len(ah.eventsCache),
+	})
+
+	return nil
+}
+
+// HandlePrevEvent handles the previous event button
+func (ah *AdminHandler) HandlePrevEvent(c tb.Context) error {
+	// Parse current index from callback data
+	data := c.Callback().Data
+	var currentIndex int
+	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
+	if err != nil {
+		return nil
+	}
+
+	prevIndex := currentIndex - 1
+	if prevIndex < 0 {
+		return ah.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Это первое событие",
+			ShowAlert: false,
+		})
+	}
+
+	ah.eventsCacheMu.RLock()
+	defer ah.eventsCacheMu.RUnlock()
+
+	if prevIndex >= len(ah.eventsCache) {
+		return nil
+	}
+
+	// Format event
+	eventText := ah.formatEvent(ah.eventsCache[prevIndex], prevIndex, len(ah.eventsCache))
+
+	// Create navigation buttons
+	var buttons []tb.InlineButton
+
+	prevBtn := tb.InlineButton{
+		Unique: "prev_event",
+		Text:   "⬅️ Назад",
+		Data:   fmt.Sprintf("event_nav_%d", prevIndex-1),
+	}
+	nextBtn := tb.InlineButton{
+		Unique: "next_event",
+		Text:   "Далее ➡️",
+		Data:   fmt.Sprintf("event_nav_%d", prevIndex+1),
+	}
+
+	if prevIndex > 0 {
+		buttons = append(buttons, prevBtn)
+	}
+	if prevIndex < len(ah.eventsCache)-1 {
+		buttons = append(buttons, nextBtn)
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{buttons},
+	}
+
+	// Edit message
+	ah.bot.Edit(c.Callback().Message, eventText, markup)
+	return ah.bot.Respond(c.Callback(), &tb.CallbackResponse{})
+}
+
+// HandleNextEvent handles the next event button
+func (ah *AdminHandler) HandleNextEvent(c tb.Context) error {
+	// Parse current index from callback data
+	data := c.Callback().Data
+	var currentIndex int
+	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
+	if err != nil {
+		return nil
+	}
+
+	nextIndex := currentIndex + 1
+
+	ah.eventsCacheMu.RLock()
+	defer ah.eventsCacheMu.RUnlock()
+
+	if nextIndex >= len(ah.eventsCache) {
+		return ah.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Это последнее событие",
+			ShowAlert: false,
+		})
+	}
+
+	// Format event
+	eventText := ah.formatEvent(ah.eventsCache[nextIndex], nextIndex, len(ah.eventsCache))
+
+	// Create navigation buttons
+	var buttons []tb.InlineButton
+
+	prevBtn := tb.InlineButton{
+		Unique: "prev_event",
+		Text:   "⬅️ Назад",
+		Data:   fmt.Sprintf("event_nav_%d", nextIndex-1),
+	}
+	nextBtn := tb.InlineButton{
+		Unique: "next_event",
+		Text:   "Далее ➡️",
+		Data:   fmt.Sprintf("event_nav_%d", nextIndex+1),
+	}
+
+	if nextIndex > 0 {
+		buttons = append(buttons, prevBtn)
+	}
+	if nextIndex < len(ah.eventsCache)-1 {
+		buttons = append(buttons, nextBtn)
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{buttons},
+	}
+
+	// Edit message
+	ah.bot.Edit(c.Callback().Message, eventText, markup)
+	return ah.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }

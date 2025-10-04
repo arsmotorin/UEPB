@@ -49,6 +49,8 @@ type AdminHandlerInterface interface {
 	HandleListBan(c tb.Context) error
 	HandleSpamBan(c tb.Context) error
 	HandleTestParsing(c tb.Context) error
+	HandlePrevEvent(c tb.Context) error
+	HandleNextEvent(c tb.Context) error
 	AddViolation(userID int64)
 	GetViolations(userID int64) int
 	ClearViolations(userID int64)
