@@ -1,6 +1,7 @@
 package features
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -284,9 +285,18 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 	// Send the initial message
 	statusMsg, _ := ah.bot.Send(c.Chat(), "🔄 Парсинг...")
 
+	// Create HTTP client with custom transport
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+
 	// Parse the website
 	url := "https://ue.poznan.pl/wydarzenia/"
-	resp, err := http.Get(url)
+	resp, err := client.Get(url)
 	if err != nil {
 		logger.Error("Failed to fetch events page", err, logrus.Fields{
 			"url": url,
@@ -317,7 +327,7 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 
 	// Extract text content
 	var result strings.Builder
-	result.WriteString("📰 *События на сайте UE Познаń:*\n\n")
+	result.WriteString("📰 *События на сайте UE Poznań:*\n\n")
 
 	// Find current month
 	currentMonth := strings.TrimSpace(doc.Find(".eventsList__monthTitle").First().Text())
