@@ -239,6 +239,13 @@ func (fh *FeatureHandler) HandleGuest(c tb.Context) error {
 	fh.state.ClearNewbie(int(c.Sender().ID))
 	msg := fh.SendOrEdit(c.Chat(), c.Message(), "✅ Теперь можно писать в чат. Задай свой вопрос.", nil)
 	fh.adminHandler.DeleteAfter(msg, 5*time.Second)
+
+	// Log to admin chat
+	logMsg := fmt.Sprintf("🧐 Пользователь выбрал, что у него есть вопрос.\n\n"+
+		"Пользователь: %s",
+		fh.adminHandler.GetUserDisplayName(c.Sender()))
+	fh.adminHandler.LogToAdmin(logMsg)
+
 	return nil
 }
 
