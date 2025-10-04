@@ -630,14 +630,7 @@ func escapeMarkdown(text string) string {
 		"`", "\\`",
 		">", "\\>",
 		"#", "\\#",
-		"+", "\\+",
-		"-", "\\-",
-		"=", "\\=",
 		"|", "\\|",
-		"{", "\\{",
-		"}", "\\}",
-		".", "\\.",
-		"!", "\\!",
 	)
 	return replacer.Replace(text)
 }
@@ -1080,8 +1073,21 @@ func (fh *FeatureHandler) HandleEventUnsubscribe(c tb.Context) error {
 		return nil
 	}
 
-	eventID := strings.TrimPrefix(c.Callback().Data, "event_unsub_")
+	eventID := strings.TrimPrefix(c.Callback().Data, "unsub_")
 	userID := c.Sender().ID
+
+	// Check if user is actually subscribed
+	fh.userEventInterestsMu.RLock()
+	userInterests, exists := fh.userEventInterests[userID]
+	isSubscribed := exists && userInterests[eventID]
+	fh.userEventInterestsMu.RUnlock()
+
+	if !isSubscribed {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Ты не подписан на это событие",
+			ShowAlert: false,
+		})
+	}
 
 	// Remove user from event interests
 	fh.eventInterestsMu.Lock()
