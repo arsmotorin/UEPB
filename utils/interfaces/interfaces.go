@@ -48,9 +48,6 @@ type AdminHandlerInterface interface {
 	HandleUnban(c tb.Context) error
 	HandleListBan(c tb.Context) error
 	HandleSpamBan(c tb.Context) error
-	HandleTestParsing(c tb.Context) error
-	HandlePrevEvent(c tb.Context) error
-	HandleNextEvent(c tb.Context) error
 	AddViolation(userID int64)
 	GetViolations(userID int64) int
 	ClearViolations(userID int64)
@@ -68,6 +65,9 @@ type FeatureHandlerInterface interface {
 	HandleGuest(c tb.Context) error
 	HandleAds(c tb.Context) error
 	HandlePing(c tb.Context) error
+	HandleEvent(c tb.Context) error
+	HandlePrevEvent(c tb.Context) error
+	HandleNextEvent(c tb.Context) error
 	RateLimit(handler func(tb.Context) error) func(tb.Context) error
 	RegisterQuizHandlers(bot *tb.Bot)
 	CreateQuizHandler(i int, q QuestionInterface, btn tb.InlineButton) func(tb.Context) error

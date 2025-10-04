@@ -74,8 +74,8 @@ func (h *Handler) Register() {
 	// Event navigation buttons
 	prevEventBtn := tb.InlineButton{Unique: "prev_event"}
 	nextEventBtn := tb.InlineButton{Unique: "next_event"}
-	h.bot.Handle(&prevEventBtn, h.adminHandler.HandlePrevEvent)
-	h.bot.Handle(&nextEventBtn, h.adminHandler.HandleNextEvent)
+	h.bot.Handle(&prevEventBtn, h.featureHandler.HandlePrevEvent)
+	h.bot.Handle(&nextEventBtn, h.featureHandler.HandleNextEvent)
 
 	// Quiz handlers
 	h.featureHandler.RegisterQuizHandlers(h.bot)
@@ -85,10 +85,10 @@ func (h *Handler) Register() {
 	h.bot.Handle("/unbanword", h.adminHandler.HandleUnban)
 	h.bot.Handle("/listbanword", h.adminHandler.HandleListBan)
 	h.bot.Handle("/spamban", h.adminHandler.HandleSpamBan)
-	h.bot.Handle("/testparsing", h.adminHandler.HandleTestParsing)
 
 	// Feature commands
 	h.bot.Handle("/ping", h.featureHandler.RateLimit(h.featureHandler.HandlePing))
+	h.bot.Handle("/events", h.featureHandler.HandleEvent)
 
 	// Message filter
 	h.bot.Handle(tb.OnText, h.featureHandler.FilterMessage)
@@ -100,12 +100,12 @@ func (h *Handler) Register() {
 // setBotCommands sets bot commands
 func (h *Handler) setBotCommands() {
 	commands := []tb.Command{
+		{Text: "events", Description: "Узнать о событиях университета"},
 		{Text: "ping", Description: "Проверить отклик бота"},
 		{Text: "banword", Description: "Добавить запрещённое слово"},
 		{Text: "unbanword", Description: "Удалить запрещённое слово"},
 		{Text: "listbanword", Description: "Показать список запрещённых слов"},
 		{Text: "spamban", Description: "Забанить пользователя за спам"},
-		{Text: "testparsing", Description: "Узнать о событиях"},
 	}
 
 	if err := h.bot.SetCommands(commands); err != nil {

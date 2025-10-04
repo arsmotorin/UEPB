@@ -1,14 +1,16 @@
 package features
 
 import (
+	"UEPB/utils/interfaces"
+	"UEPB/utils/logger"
+	"crypto/tls"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"UEPB/utils/interfaces"
-	"UEPB/utils/logger"
-
+	"github.com/PuerkitoBio/goquery"
 	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
 )
@@ -26,7 +28,20 @@ type FeatureHandler struct {
 	Btns        struct {
 		Student, Guest, Ads tb.InlineButton
 	}
-	adminHandler interfaces.AdminHandlerInterface
+	adminHandler  interfaces.AdminHandlerInterface
+	eventsCache   []EventData
+	eventsCacheMu sync.RWMutex
+	cacheTime     time.Time
+}
+
+// EventData stores event information
+type EventData struct {
+	Day         string
+	Month       string
+	Time        string
+	Category    string
+	Title       string
+	Description string
 }
 
 // NewFeatureHandler creates a new feature handler
@@ -454,4 +469,269 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 		}
 	}
 	return nil
+}
+
+// EVENT FEATURES
+
+// fetchEventsFromWebsite fetches events from the UE Poznan website
+func (fh *FeatureHandler) fetchEventsFromWebsite() error {
+	// Create HTTP client with custom transport to skip certificate verification
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+
+	url := "https://ue.poznan.pl/wydarzenia/"
+	resp, err := client.Get(url)
+	if err != nil {
+		logger.Error("Failed to fetch events page", err, logrus.Fields{"url": url})
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		logger.Error("Non-200 status code", nil, logrus.Fields{"url": url, "status": resp.StatusCode})
+		return fmt.Errorf("HTTP status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		logger.Error("Failed to parse HTML", err, logrus.Fields{"url": url})
+		return err
+	}
+
+	currentMonth := strings.TrimSpace(doc.Find(".eventsList__monthTitle").First().Text())
+
+	var events []EventData
+	doc.Find(".eventsList__event").Each(func(i int, s *goquery.Selection) {
+		day := strings.TrimSpace(s.Find(".eventsList__eventDay").Text())
+		eventTime := strings.TrimSpace(s.Find(".eventsList__eventTime").Text())
+		category := strings.TrimSpace(s.Find(".eventsList__eventCategory").Text())
+		title := strings.TrimSpace(s.Find(".eventsList__eventTitle").Text())
+		fullText := strings.TrimSpace(s.Find(".eventsList__eventFullText .wysiwyg").Text())
+
+		if fullText == "" {
+			fullText = strings.TrimSpace(s.Find(".eventsList__eventExcerpt").Text())
+		}
+
+		if title != "" {
+			events = append(events, EventData{
+				Day:         day,
+				Month:       currentMonth,
+				Time:        eventTime,
+				Category:    category,
+				Title:       title,
+				Description: fullText,
+			})
+		}
+	})
+
+	fh.eventsCacheMu.Lock()
+	fh.eventsCache = events
+	fh.cacheTime = time.Now()
+	fh.eventsCacheMu.Unlock()
+
+	logger.Info("Events cached successfully", logrus.Fields{"count": len(events)})
+	return nil
+}
+
+// formatEventText formats a single event for display
+func (fh *FeatureHandler) formatEventText(event EventData, index int, total int) string {
+	var result strings.Builder
+
+	result.WriteString(fmt.Sprintf("🗓 *%s*\n\n", event.Title))
+
+	if event.Description != "" {
+		desc := strings.ReplaceAll(event.Description, "\n\n\n", "\n\n")
+		desc = strings.TrimSpace(desc)
+
+		trainingScheduleURL := "https://app.ue.poznan.pl/TrainingsSchedule/Account/Login?ReturnUrl=%2fTrainingsSchedule%2f"
+		lines := strings.Split(desc, "\n")
+		for i, line := range lines {
+			trimmedLine := strings.TrimSpace(line)
+			if trimmedLine == "Więcej informacji" {
+				lines[i] = fmt.Sprintf("[Więcej informacji](%s)", trainingScheduleURL)
+			}
+		}
+		desc = strings.Join(lines, "\n")
+
+		result.WriteString(fmt.Sprintf("%s\n\n", desc))
+	}
+
+	if event.Day != "" {
+		timeStr := ""
+		if event.Time != "" {
+			timeStr = strings.TrimSpace(event.Time)
+			timeStr = strings.TrimSuffix(timeStr, "-")
+			timeStr = strings.TrimSpace(timeStr)
+		}
+
+		monthName := event.Month
+		if strings.Contains(monthName, " ") {
+			parts := strings.Split(monthName, " ")
+			monthName = strings.ToLower(parts[0])
+		}
+
+		if timeStr != "" {
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", event.Day, monthName, timeStr))
+		} else {
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s", event.Day, monthName))
+		}
+	}
+
+	result.WriteString(fmt.Sprintf("\n\nWydarzenie %d z %d", index+1, total))
+	return result.String()
+}
+
+// HandleEvent handles the /events command
+func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
+	statusMsg, _ := fh.bot.Send(c.Chat(), "🔄 Загрузка событий...")
+
+	fh.eventsCacheMu.RLock()
+	cacheValid := time.Since(fh.cacheTime) < 5*time.Minute && len(fh.eventsCache) > 0
+	fh.eventsCacheMu.RUnlock()
+
+	if !cacheValid {
+		err := fh.fetchEventsFromWebsite()
+		if err != nil {
+			fh.bot.Edit(statusMsg, "❌ Ошибка при загрузке событий.")
+			return nil
+		}
+	}
+
+	fh.eventsCacheMu.RLock()
+	defer fh.eventsCacheMu.RUnlock()
+
+	if len(fh.eventsCache) == 0 {
+		fh.bot.Edit(statusMsg, "❌ Событий нет.")
+		return nil
+	}
+
+	eventText := fh.formatEventText(fh.eventsCache[0], 0, len(fh.eventsCache))
+
+	nextBtn := tb.InlineButton{
+		Unique: "next_event",
+		Text:   "Далее ➡️",
+		Data:   "event_nav_0",
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{{nextBtn}},
+	}
+
+	fh.bot.Edit(statusMsg, eventText, markup)
+
+	logger.Info("Event displayed", logrus.Fields{
+		"user":        fh.adminHandler.GetUserDisplayName(c.Sender()),
+		"event_index": 0,
+		"total":       len(fh.eventsCache),
+	})
+
+	return nil
+}
+
+// HandlePrevEvent handles the previous event button
+func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
+	data := c.Callback().Data
+	var currentIndex int
+	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
+	if err != nil {
+		return nil
+	}
+
+	prevIndex := currentIndex - 1
+	if prevIndex < 0 {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Это первое событие",
+			ShowAlert: false,
+		})
+	}
+
+	fh.eventsCacheMu.RLock()
+	defer fh.eventsCacheMu.RUnlock()
+
+	if prevIndex >= len(fh.eventsCache) {
+		return nil
+	}
+
+	eventText := fh.formatEventText(fh.eventsCache[prevIndex], prevIndex, len(fh.eventsCache))
+
+	var buttons []tb.InlineButton
+
+	if prevIndex > 0 {
+		prevBtn := tb.InlineButton{
+			Unique: "prev_event",
+			Text:   "⬅️ Назад",
+			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
+		}
+		buttons = append(buttons, prevBtn)
+	}
+	if prevIndex < len(fh.eventsCache)-1 {
+		nextBtn := tb.InlineButton{
+			Unique: "next_event",
+			Text:   "Далее ➡️",
+			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
+		}
+		buttons = append(buttons, nextBtn)
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{buttons},
+	}
+
+	fh.bot.Edit(c.Callback().Message, eventText, markup)
+	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
+}
+
+// HandleNextEvent handles the next event button
+func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
+	data := c.Callback().Data
+	var currentIndex int
+	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
+	if err != nil {
+		return nil
+	}
+
+	nextIndex := currentIndex + 1
+
+	fh.eventsCacheMu.RLock()
+	defer fh.eventsCacheMu.RUnlock()
+
+	if nextIndex >= len(fh.eventsCache) {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Это последнее событие",
+			ShowAlert: false,
+		})
+	}
+
+	eventText := fh.formatEventText(fh.eventsCache[nextIndex], nextIndex, len(fh.eventsCache))
+
+	var buttons []tb.InlineButton
+
+	if nextIndex > 0 {
+		prevBtn := tb.InlineButton{
+			Unique: "prev_event",
+			Text:   "⬅️ Назад",
+			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
+		}
+		buttons = append(buttons, prevBtn)
+	}
+	if nextIndex < len(fh.eventsCache)-1 {
+		nextBtn := tb.InlineButton{
+			Unique: "next_event",
+			Text:   "Далее ➡️",
+			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
+		}
+		buttons = append(buttons, nextBtn)
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{buttons},
+	}
+
+	fh.bot.Edit(c.Callback().Message, eventText, markup)
+	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
