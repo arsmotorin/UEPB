@@ -382,7 +382,7 @@ func (ah *AdminHandler) formatEvent(event EventData, index int, total int) strin
 	var result strings.Builder
 
 	// Title
-	result.WriteString(fmt.Sprintf("🗓 *%s*\n\n", event.Title))
+	result.WriteString(fmt.Sprintf("📰 %s\n\n", event.Title))
 
 	// Description
 	if event.Description != "" {
@@ -396,7 +396,10 @@ func (ah *AdminHandler) formatEvent(event EventData, index int, total int) strin
 	if event.Day != "" {
 		timeStr := ""
 		if event.Time != "" {
-			timeStr = event.Time
+			// Remove trailing dash if present
+			timeStr = strings.TrimSpace(event.Time)
+			timeStr = strings.TrimSuffix(timeStr, "-")
+			timeStr = strings.TrimSpace(timeStr)
 		}
 
 		// Extract month name from Month field (e.g., "Październik 2025")
@@ -406,11 +409,15 @@ func (ah *AdminHandler) formatEvent(event EventData, index int, total int) strin
 			monthName = strings.ToLower(parts[0])
 		}
 
-		result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", event.Day, monthName, timeStr))
+		if timeStr != "" {
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", event.Day, monthName, timeStr))
+		} else {
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s", event.Day, monthName))
+		}
 	}
 
-	// Footer with pagination
-	result.WriteString(fmt.Sprintf("\n\n_Wydarzenie %d z %d_", index+1, total))
+	// Footer with pagination (no italic)
+	result.WriteString(fmt.Sprintf("\n\nWydarzenie %d z %d", index+1, total))
 
 	return result.String()
 }
@@ -421,15 +428,15 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 		return nil
 	}
 
-	// Send initial message
+	// Send the initial message
 	statusMsg, _ := ah.bot.Send(c.Chat(), "🔄 Загрузка...")
 
-	// Check if cache is valid (less than 5 minutes old)
+	// Check if the cache is valid (less than 5 minutes old)
 	ah.eventsCacheMu.RLock()
 	cacheValid := time.Since(ah.cacheTime) < 5*time.Minute && len(ah.eventsCache) > 0
 	ah.eventsCacheMu.RUnlock()
 
-	// Fetch events if cache is invalid
+	// Fetch events if the cache is invalid
 	if !cacheValid {
 		err := ah.fetchAndCacheEvents()
 		if err != nil {
@@ -454,7 +461,7 @@ func (ah *AdminHandler) HandleTestParsing(c tb.Context) error {
 	nextBtn := tb.InlineButton{
 		Unique: "next_event",
 		Text:   "Далее ➡️",
-		Data:   "event_nav_1",
+		Data:   "event_nav_0",
 	}
 
 	markup := &tb.ReplyMarkup{
@@ -485,6 +492,7 @@ func (ah *AdminHandler) HandlePrevEvent(c tb.Context) error {
 		return nil
 	}
 
+	// Go to a previous event
 	prevIndex := currentIndex - 1
 	if prevIndex < 0 {
 		return ah.bot.Respond(c.Callback(), &tb.CallbackResponse{
@@ -506,21 +514,20 @@ func (ah *AdminHandler) HandlePrevEvent(c tb.Context) error {
 	// Create navigation buttons
 	var buttons []tb.InlineButton
 
-	prevBtn := tb.InlineButton{
-		Unique: "prev_event",
-		Text:   "⬅️ Назад",
-		Data:   fmt.Sprintf("event_nav_%d", prevIndex-1),
-	}
-	nextBtn := tb.InlineButton{
-		Unique: "next_event",
-		Text:   "Далее ➡️",
-		Data:   fmt.Sprintf("event_nav_%d", prevIndex+1),
-	}
-
 	if prevIndex > 0 {
+		prevBtn := tb.InlineButton{
+			Unique: "prev_event",
+			Text:   "⬅️ Назад",
+			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
+		}
 		buttons = append(buttons, prevBtn)
 	}
 	if prevIndex < len(ah.eventsCache)-1 {
+		nextBtn := tb.InlineButton{
+			Unique: "next_event",
+			Text:   "Далее ➡️",
+			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
+		}
 		buttons = append(buttons, nextBtn)
 	}
 
@@ -543,6 +550,7 @@ func (ah *AdminHandler) HandleNextEvent(c tb.Context) error {
 		return nil
 	}
 
+	// Go to the next event
 	nextIndex := currentIndex + 1
 
 	ah.eventsCacheMu.RLock()
@@ -561,21 +569,20 @@ func (ah *AdminHandler) HandleNextEvent(c tb.Context) error {
 	// Create navigation buttons
 	var buttons []tb.InlineButton
 
-	prevBtn := tb.InlineButton{
-		Unique: "prev_event",
-		Text:   "⬅️ Назад",
-		Data:   fmt.Sprintf("event_nav_%d", nextIndex-1),
-	}
-	nextBtn := tb.InlineButton{
-		Unique: "next_event",
-		Text:   "Далее ➡️",
-		Data:   fmt.Sprintf("event_nav_%d", nextIndex+1),
-	}
-
 	if nextIndex > 0 {
+		prevBtn := tb.InlineButton{
+			Unique: "prev_event",
+			Text:   "⬅️ Назад",
+			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
+		}
 		buttons = append(buttons, prevBtn)
 	}
 	if nextIndex < len(ah.eventsCache)-1 {
+		nextBtn := tb.InlineButton{
+			Unique: "next_event",
+			Text:   "Далее ➡️",
+			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
+		}
 		buttons = append(buttons, nextBtn)
 	}
 
