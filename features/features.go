@@ -28,12 +28,22 @@ type FeatureHandler struct {
 	Btns        struct {
 		Student, Guest, Ads tb.InlineButton
 	}
-	adminHandler     interfaces.AdminHandlerInterface
-	eventsCache      []EventData
-	eventsCacheMu    sync.RWMutex
-	cacheTime        time.Time
-	eventRateLimit   map[int64]time.Time
-	eventRateLimitMu sync.Mutex
+	adminHandler         interfaces.AdminHandlerInterface
+	eventsCache          []EventData
+	eventsCacheMu        sync.RWMutex
+	cacheTime            time.Time
+	eventRateLimit       map[int64]time.Time
+	eventRateLimitMu     sync.Mutex
+	eventInterests       map[string][]int64 // eventID -> list of user IDs
+	eventInterestsMu     sync.RWMutex
+	userEventInterests   map[int64]map[string]bool // userID -> eventID -> interested
+	userEventInterestsMu sync.RWMutex
+	pendingActivations   map[int64]string // userID -> eventID waiting for bot activation
+	pendingActivationsMu sync.Mutex
+	activatedUsers       map[int64]bool // userID -> has activated bot in private chat
+	activatedUsersMu     sync.RWMutex
+	eventMessageOwners   map[string]int64 // messageID -> userID who called /events
+	eventMessageOwnersMu sync.RWMutex
 }
 
 // EventData stores event information
@@ -46,19 +56,29 @@ type EventData struct {
 	Description string
 }
 
+// GetEventID returns a unique identifier for an event
+func (e EventData) GetEventID() string {
+	return fmt.Sprintf("%s_%s_%s", e.Day, e.Month, e.Title)
+}
+
 // NewFeatureHandler creates a new feature handler
 func NewFeatureHandler(bot *tb.Bot, state interfaces.UserState, quiz interfaces.QuizInterface, blacklist interfaces.BlacklistInterface, adminChatID int64, violations map[int64]int, adminHandler interfaces.AdminHandlerInterface, btns struct{ Student, Guest, Ads tb.InlineButton }) *FeatureHandler {
 	return &FeatureHandler{
-		bot:            bot,
-		state:          state,
-		quiz:           quiz,
-		blacklist:      blacklist,
-		adminChatID:    adminChatID,
-		violations:     violations,
-		rateLimit:      make(map[int64]time.Time),
-		Btns:           btns,
-		adminHandler:   adminHandler,
-		eventRateLimit: make(map[int64]time.Time),
+		bot:                bot,
+		state:              state,
+		quiz:               quiz,
+		blacklist:          blacklist,
+		adminChatID:        adminChatID,
+		violations:         violations,
+		rateLimit:          make(map[int64]time.Time),
+		Btns:               btns,
+		adminHandler:       adminHandler,
+		eventRateLimit:     make(map[int64]time.Time),
+		eventInterests:     make(map[string][]int64),
+		userEventInterests: make(map[int64]map[string]bool),
+		pendingActivations: make(map[int64]string),
+		activatedUsers:     make(map[int64]bool),
+		eventMessageOwners: make(map[string]int64),
 	}
 }
 
@@ -70,7 +90,7 @@ func (fh *FeatureHandler) OnlyNewbies(handler func(tb.Context) error) func(tb.Co
 		if c.Sender() == nil || !fh.state.IsNewbie(int(c.Sender().ID)) {
 			if cb := c.Callback(); cb != nil {
 				_ = fh.bot.Respond(cb, &tb.CallbackResponse{
-					Text:      "Ты не можешь нажимать на чужие кнопки",
+					Text:      "Это не твоя кнопка",
 					ShowAlert: false,
 				})
 			}
@@ -639,7 +659,8 @@ func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
 		return nil
 	}
 
-	eventText := fh.formatEventText(fh.eventsCache[0], 0, len(fh.eventsCache))
+	event := fh.eventsCache[0]
+	eventText := fh.formatEventText(event, 0, len(fh.eventsCache))
 
 	nextBtn := tb.InlineButton{
 		Unique: "next_event",
@@ -647,11 +668,28 @@ func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
 		Data:   "event_nav_0",
 	}
 
-	markup := &tb.ReplyMarkup{
-		InlineKeyboard: [][]tb.InlineButton{{nextBtn}},
+	interestedBtn := tb.InlineButton{
+		Unique: "event_interested",
+		Text:   "Интересует 🔔",
+		Data:   fmt.Sprintf("event_int_%s", event.GetEventID()),
 	}
 
-	fh.bot.Edit(statusMsg, eventText, markup, tb.ModeMarkdown)
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{
+			{nextBtn},
+			{interestedBtn},
+		},
+	}
+
+	editedMsg, _ := fh.bot.Edit(statusMsg, eventText, markup, tb.ModeMarkdown)
+
+	// Store message owner
+	if editedMsg != nil {
+		messageKey := fmt.Sprintf("%d_%d", editedMsg.Chat.ID, editedMsg.ID)
+		fh.eventMessageOwnersMu.Lock()
+		fh.eventMessageOwners[messageKey] = c.Sender().ID
+		fh.eventMessageOwnersMu.Unlock()
+	}
 
 	logger.Info("Event displayed", logrus.Fields{
 		"user":        fh.adminHandler.GetUserDisplayName(c.Sender()),
@@ -664,6 +702,23 @@ func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
 
 // HandlePrevEvent handles the previous event button
 func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
+	if c.Callback() == nil || c.Sender() == nil || c.Callback().Message == nil {
+		return nil
+	}
+
+	// Check if user is the owner of this message
+	messageKey := fmt.Sprintf("%d_%d", c.Callback().Message.Chat.ID, c.Callback().Message.ID)
+	fh.eventMessageOwnersMu.RLock()
+	ownerID, exists := fh.eventMessageOwners[messageKey]
+	fh.eventMessageOwnersMu.RUnlock()
+
+	if exists && ownerID != c.Sender().ID {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Это не твоя кнопка",
+			ShowAlert: true,
+		})
+	}
+
 	data := c.Callback().Data
 	var currentIndex int
 	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
@@ -686,9 +741,10 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 		return nil
 	}
 
-	eventText := fh.formatEventText(fh.eventsCache[prevIndex], prevIndex, len(fh.eventsCache))
+	event := fh.eventsCache[prevIndex]
+	eventText := fh.formatEventText(event, prevIndex, len(fh.eventsCache))
 
-	var buttons []tb.InlineButton
+	var navButtons []tb.InlineButton
 
 	if prevIndex > 0 {
 		prevBtn := tb.InlineButton{
@@ -696,7 +752,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 			Text:   "⬅️ Назад",
 			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
 		}
-		buttons = append(buttons, prevBtn)
+		navButtons = append(navButtons, prevBtn)
 	}
 	if prevIndex < len(fh.eventsCache)-1 {
 		nextBtn := tb.InlineButton{
@@ -704,11 +760,17 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 			Text:   "Далее ➡️",
 			Data:   fmt.Sprintf("event_nav_%d", prevIndex),
 		}
-		buttons = append(buttons, nextBtn)
+		navButtons = append(navButtons, nextBtn)
+	}
+
+	interestedBtn := tb.InlineButton{
+		Unique: "event_interested",
+		Text:   "Интересует 🔔",
+		Data:   fmt.Sprintf("event_int_%s", event.GetEventID()),
 	}
 
 	markup := &tb.ReplyMarkup{
-		InlineKeyboard: [][]tb.InlineButton{buttons},
+		InlineKeyboard: [][]tb.InlineButton{navButtons, {interestedBtn}},
 	}
 
 	fh.bot.Edit(c.Callback().Message, eventText, markup, tb.ModeMarkdown)
@@ -717,6 +779,23 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 
 // HandleNextEvent handles the next event button
 func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
+	if c.Callback() == nil || c.Sender() == nil || c.Callback().Message == nil {
+		return nil
+	}
+
+	// Check if user is the owner of this message
+	messageKey := fmt.Sprintf("%d_%d", c.Callback().Message.Chat.ID, c.Callback().Message.ID)
+	fh.eventMessageOwnersMu.RLock()
+	ownerID, exists := fh.eventMessageOwners[messageKey]
+	fh.eventMessageOwnersMu.RUnlock()
+
+	if exists && ownerID != c.Sender().ID {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Это не твоя кнопка",
+			ShowAlert: true,
+		})
+	}
+
 	data := c.Callback().Data
 	var currentIndex int
 	_, err := fmt.Sscanf(data, "event_nav_%d", &currentIndex)
@@ -736,9 +815,10 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 		})
 	}
 
-	eventText := fh.formatEventText(fh.eventsCache[nextIndex], nextIndex, len(fh.eventsCache))
+	event := fh.eventsCache[nextIndex]
+	eventText := fh.formatEventText(event, nextIndex, len(fh.eventsCache))
 
-	var buttons []tb.InlineButton
+	var navButtons []tb.InlineButton
 
 	if nextIndex > 0 {
 		prevBtn := tb.InlineButton{
@@ -746,7 +826,7 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 			Text:   "⬅️ Назад",
 			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
 		}
-		buttons = append(buttons, prevBtn)
+		navButtons = append(navButtons, prevBtn)
 	}
 	if nextIndex < len(fh.eventsCache)-1 {
 		nextBtn := tb.InlineButton{
@@ -754,13 +834,288 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 			Text:   "Далее ➡️",
 			Data:   fmt.Sprintf("event_nav_%d", nextIndex),
 		}
-		buttons = append(buttons, nextBtn)
+		navButtons = append(navButtons, nextBtn)
+	}
+
+	interestedBtn := tb.InlineButton{
+		Unique: "event_interested",
+		Text:   "Интересует 🔔",
+		Data:   fmt.Sprintf("event_int_%s", event.GetEventID()),
 	}
 
 	markup := &tb.ReplyMarkup{
-		InlineKeyboard: [][]tb.InlineButton{buttons},
+		InlineKeyboard: [][]tb.InlineButton{navButtons, {interestedBtn}},
 	}
 
 	fh.bot.Edit(c.Callback().Message, eventText, markup, tb.ModeMarkdown)
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
+}
+
+// HandleEventInterested handles when user clicks "Интересует" button
+func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
+	if c.Callback() == nil || c.Sender() == nil || c.Callback().Message == nil {
+		return nil
+	}
+
+	// Check if the user is the owner of this message
+	messageKey := fmt.Sprintf("%d_%d", c.Callback().Message.Chat.ID, c.Callback().Message.ID)
+	fh.eventMessageOwnersMu.RLock()
+	ownerID, exists := fh.eventMessageOwners[messageKey]
+	fh.eventMessageOwnersMu.RUnlock()
+
+	if exists && ownerID != c.Sender().ID {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Это не твоя кнопка",
+			ShowAlert: true,
+		})
+	}
+
+	// Extract event ID from callback data
+	eventID := strings.TrimPrefix(c.Callback().Data, "event_int_")
+	userID := c.Sender().ID
+
+	// Check if user has already expressed interest
+	fh.userEventInterestsMu.RLock()
+	userInterests, existsInterest := fh.userEventInterests[userID]
+	alreadyInterested := existsInterest && userInterests[eventID]
+	fh.userEventInterestsMu.RUnlock()
+
+	if alreadyInterested {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Ты уже подписан на это событие",
+			ShowAlert: true,
+		})
+	}
+
+	// Check if user has already activated bot
+	fh.activatedUsersMu.RLock()
+	isActivated := fh.activatedUsers[userID]
+	fh.activatedUsersMu.RUnlock()
+
+	if isActivated {
+		// User already activated bot, register interest immediately
+		fh.eventInterestsMu.Lock()
+		if fh.eventInterests[eventID] == nil {
+			fh.eventInterests[eventID] = []int64{}
+		}
+		fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
+		fh.eventInterestsMu.Unlock()
+
+		fh.userEventInterestsMu.Lock()
+		if fh.userEventInterests[userID] == nil {
+			fh.userEventInterests[userID] = make(map[string]bool)
+		}
+		fh.userEventInterests[userID][eventID] = true
+		fh.userEventInterestsMu.Unlock()
+
+		logger.Info("User subscribed to event (already activated)", logrus.Fields{
+			"user_id":  userID,
+			"event_id": eventID,
+		})
+
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "✅ Ты подписался на событие! Я пришлю тебе напоминания.",
+			ShowAlert: true,
+		})
+	}
+
+	// Store pending activation
+	fh.pendingActivationsMu.Lock()
+	fh.pendingActivations[userID] = eventID
+	fh.pendingActivationsMu.Unlock()
+
+	// Send message to group chat that will auto-delete
+	warnMsg, _ := fh.bot.Send(c.Chat(), fmt.Sprintf(
+		"⚠️ %s, для получения напоминаний активируй бота в личных сообщениях.\n\nОтправь боту /start или любое сообщение.",
+		fh.adminHandler.GetUserDisplayName(c.Sender()),
+	))
+
+	if fh.adminHandler != nil {
+		fh.adminHandler.DeleteAfter(warnMsg, 15*time.Second)
+	}
+
+	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
+}
+
+// HandleStart handles /start command and activates pending event notifications
+func (fh *FeatureHandler) HandleStart(c tb.Context) error {
+	if c.Chat().Type != tb.ChatPrivate || c.Sender() == nil {
+		return nil
+	}
+
+	userID := c.Sender().ID
+
+	// Mark user as activated
+	fh.activatedUsersMu.Lock()
+	fh.activatedUsers[userID] = true
+	fh.activatedUsersMu.Unlock()
+
+	// Check for pending activation
+	fh.pendingActivationsMu.Lock()
+	eventID, hasPending := fh.pendingActivations[userID]
+	if hasPending {
+		delete(fh.pendingActivations, userID)
+	}
+	fh.pendingActivationsMu.Unlock()
+
+	if hasPending {
+		// Register user's interest in the event
+		fh.eventInterestsMu.Lock()
+		if fh.eventInterests[eventID] == nil {
+			fh.eventInterests[eventID] = []int64{}
+		}
+		fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
+		fh.eventInterestsMu.Unlock()
+
+		fh.userEventInterestsMu.Lock()
+		if fh.userEventInterests[userID] == nil {
+			fh.userEventInterests[userID] = make(map[string]bool)
+		}
+		fh.userEventInterests[userID][eventID] = true
+		fh.userEventInterestsMu.Unlock()
+
+		// Send confirmation with unsubscribe button
+		unsubBtn := tb.InlineButton{
+			Unique: "event_unsubscribe",
+			Text:   "Больше не интересно ❌",
+			Data:   fmt.Sprintf("event_unsub_%s", eventID),
+		}
+
+		markup := &tb.ReplyMarkup{
+			InlineKeyboard: [][]tb.InlineButton{{unsubBtn}},
+		}
+
+		_, err := fh.bot.Send(c.Chat(),
+			"✅ Ты успешно подписался на событие.\n\n"+
+				"Я пришлю тебе напоминания за сутки и за 2 часа до начала события.",
+			markup,
+		)
+
+		logger.Info("User subscribed to event", logrus.Fields{
+			"user_id":  userID,
+			"event_id": eventID,
+		})
+
+		return err
+	}
+
+	// Regular start message
+	_, err := fh.bot.Send(c.Chat(),
+		"👋 Привет! Я – бот студенческой группы UEP.\n.\n\n"+
+			"Здесь я могу напоминать тебе о интересующих тебя событиях. Используй команду /events в группе, чтобы посмотреть события и подписаться на них.",
+	)
+	return err
+}
+
+// HandlePrivateMessage handles any private message and activates pending notifications
+func (fh *FeatureHandler) HandlePrivateMessage(c tb.Context) error {
+	if c.Chat().Type != tb.ChatPrivate || c.Sender() == nil || c.Message() == nil {
+		return nil
+	}
+
+	// Ignore commands
+	if strings.HasPrefix(c.Message().Text, "/") {
+		return nil
+	}
+
+	userID := c.Sender().ID
+
+	// Mark user as activated
+	fh.activatedUsersMu.Lock()
+	fh.activatedUsers[userID] = true
+	fh.activatedUsersMu.Unlock()
+
+	// Check for pending activation
+	fh.pendingActivationsMu.Lock()
+	eventID, hasPending := fh.pendingActivations[userID]
+	if hasPending {
+		delete(fh.pendingActivations, userID)
+	}
+	fh.pendingActivationsMu.Unlock()
+
+	if hasPending {
+		// Register a user's interest in the event
+		fh.eventInterestsMu.Lock()
+		if fh.eventInterests[eventID] == nil {
+			fh.eventInterests[eventID] = []int64{}
+		}
+		fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
+		fh.eventInterestsMu.Unlock()
+
+		fh.userEventInterestsMu.Lock()
+		if fh.userEventInterests[userID] == nil {
+			fh.userEventInterests[userID] = make(map[string]bool)
+		}
+		fh.userEventInterests[userID][eventID] = true
+		fh.userEventInterestsMu.Unlock()
+
+		// Send confirmation with unsubscribe button
+		unsubBtn := tb.InlineButton{
+			Unique: "event_unsubscribe",
+			Text:   "Больше не интересно ❌",
+			Data:   fmt.Sprintf("event_unsub_%s", eventID),
+		}
+
+		markup := &tb.ReplyMarkup{
+			InlineKeyboard: [][]tb.InlineButton{{unsubBtn}},
+		}
+
+		_, err := fh.bot.Send(c.Chat(),
+			"✅ Ты успешно подписался на событие.\n\n"+
+				"Я пришлю тебе напоминания за сутки и за 2 часа до начала события.",
+			markup,
+		)
+
+		logger.Info("User subscribed to event via message", logrus.Fields{
+			"user_id":  userID,
+			"event_id": eventID,
+		})
+
+		return err
+	}
+
+	return nil
+}
+
+// HandleEventUnsubscribe handles when user clicks "Больше не интересно" button
+func (fh *FeatureHandler) HandleEventUnsubscribe(c tb.Context) error {
+	if c.Callback() == nil || c.Sender() == nil {
+		return nil
+	}
+
+	eventID := strings.TrimPrefix(c.Callback().Data, "event_unsub_")
+	userID := c.Sender().ID
+
+	// Remove user from event interests
+	fh.eventInterestsMu.Lock()
+	if users, exists := fh.eventInterests[eventID]; exists {
+		newUsers := []int64{}
+		for _, uid := range users {
+			if uid != userID {
+				newUsers = append(newUsers, uid)
+			}
+		}
+		fh.eventInterests[eventID] = newUsers
+	}
+	fh.eventInterestsMu.Unlock()
+
+	fh.userEventInterestsMu.Lock()
+	if userInterests, exists := fh.userEventInterests[userID]; exists {
+		delete(userInterests, eventID)
+	}
+	fh.userEventInterestsMu.Unlock()
+
+	// Edit message to show unsubscribed
+	fh.bot.Edit(c.Callback().Message,
+		"❌ Ты отписался от уведомлений об этом событии.",
+	)
+
+	logger.Info("User unsubscribed from event", logrus.Fields{
+		"user_id":  userID,
+		"event_id": eventID,
+	})
+
+	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+		Text: "Ты отписался от уведомлений",
+	})
 }

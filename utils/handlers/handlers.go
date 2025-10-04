@@ -74,8 +74,13 @@ func (h *Handler) Register() {
 	// Event navigation buttons
 	prevEventBtn := tb.InlineButton{Unique: "prev_event"}
 	nextEventBtn := tb.InlineButton{Unique: "next_event"}
+	interestedBtn := tb.InlineButton{Unique: "event_interested"}
+	unsubscribeBtn := tb.InlineButton{Unique: "event_unsubscribe"}
+
 	h.bot.Handle(&prevEventBtn, h.featureHandler.HandlePrevEvent)
 	h.bot.Handle(&nextEventBtn, h.featureHandler.HandleNextEvent)
+	h.bot.Handle(&interestedBtn, h.featureHandler.HandleEventInterested)
+	h.bot.Handle(&unsubscribeBtn, h.featureHandler.HandleEventUnsubscribe)
 
 	// Quiz handlers
 	h.featureHandler.RegisterQuizHandlers(h.bot)
@@ -89,12 +94,26 @@ func (h *Handler) Register() {
 	// Feature commands
 	h.bot.Handle("/ping", h.featureHandler.RateLimit(h.featureHandler.HandlePing))
 	h.bot.Handle("/events", h.featureHandler.HandleEvent)
+	h.bot.Handle("/start", h.featureHandler.HandleStart)
 
-	// Message filter
-	h.bot.Handle(tb.OnText, h.featureHandler.FilterMessage)
+	// Message handlers
+	h.bot.Handle(tb.OnText, h.handleTextMessage)
 
 	// Set bot commands
 	h.setBotCommands()
+}
+
+// handleTextMessage handles all text messages
+func (h *Handler) handleTextMessage(c tb.Context) error {
+	// First check if it's a private message for event activation
+	if c.Chat().Type == tb.ChatPrivate {
+		if err := h.featureHandler.HandlePrivateMessage(c); err != nil {
+			return err
+		}
+	}
+
+	// Then apply message filter
+	return h.featureHandler.FilterMessage(c)
 }
 
 // setBotCommands sets bot commands
