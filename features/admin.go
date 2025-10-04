@@ -386,9 +386,26 @@ func (ah *AdminHandler) formatEvent(event EventData, index int, total int) strin
 
 	// Description
 	if event.Description != "" {
-		// Clean up description
+		// Cleanup description
 		desc := strings.ReplaceAll(event.Description, "\n\n\n", "\n\n")
 		desc = strings.TrimSpace(desc)
+
+		// Replace standalone "Więcej informacji" with clickable link
+		// Check if it's on a separate line (surrounded by newlines or at start/end)
+		trainingScheduleURL := "https://app.ue.poznan.pl/TrainingsSchedule/Account/Login?ReturnUrl=%2fTrainingsSchedule%2f"
+
+		// Split by lines to check each line
+		lines := strings.Split(desc, "\n")
+		for i, line := range lines {
+			trimmedLine := strings.TrimSpace(line)
+			// Check if line is exactly "Więcej informacji"
+			if trimmedLine == "Więcej informacji" {
+				// Replace it with the Markdown link
+				lines[i] = fmt.Sprintf("[Więcej informacji](%s)", trainingScheduleURL)
+			}
+		}
+		desc = strings.Join(lines, "\n")
+
 		result.WriteString(fmt.Sprintf("%s\n\n", desc))
 	}
 
