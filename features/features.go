@@ -3,7 +3,9 @@ package features
 import (
 	"UEPB/utils/interfaces"
 	"UEPB/utils/logger"
+	"crypto/md5"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -58,7 +60,11 @@ type EventData struct {
 
 // GetEventID returns a unique identifier for an event
 func (e EventData) GetEventID() string {
-	return fmt.Sprintf("%s_%s_%s", e.Day, e.Month, e.Title)
+	// Create a hash from day, month, and title
+	fullID := fmt.Sprintf("%s_%s_%s", e.Day, e.Month, e.Title)
+	hash := md5.Sum([]byte(fullID))
+	// Return first 16 characters of hex hash (32 hex chars total)
+	return hex.EncodeToString(hash[:])[:16]
 }
 
 // NewFeatureHandler creates a new feature handler
