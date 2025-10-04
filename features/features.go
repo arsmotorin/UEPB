@@ -681,7 +681,22 @@ func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
 		},
 	}
 
-	editedMsg, _ := fh.bot.Edit(statusMsg, eventText, markup, tb.ModeMarkdown)
+	editedMsg, err := fh.bot.Edit(statusMsg, eventText, markup)
+	if err != nil {
+		logger.Error("Failed to edit event message", err, logrus.Fields{
+			"chat_id": c.Chat().ID,
+			"user_id": c.Sender().ID,
+		})
+		// Try without markup as fallback
+		editedMsg, err = fh.bot.Edit(statusMsg, eventText)
+		if err != nil {
+			logger.Error("Failed to edit event message (no markup)", err, logrus.Fields{
+				"chat_id": c.Chat().ID,
+				"user_id": c.Sender().ID,
+			})
+			return nil
+		}
+	}
 
 	// Store message owner
 	if editedMsg != nil {
@@ -773,7 +788,13 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 		InlineKeyboard: [][]tb.InlineButton{navButtons, {interestedBtn}},
 	}
 
-	fh.bot.Edit(c.Callback().Message, eventText, markup, tb.ModeMarkdown)
+	_, err = fh.bot.Edit(c.Callback().Message, eventText, markup)
+	if err != nil {
+		logger.Error("Failed to edit prev event message", err, logrus.Fields{
+			"chat_id": c.Callback().Message.Chat.ID,
+			"user_id": c.Sender().ID,
+		})
+	}
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
 
@@ -847,7 +868,13 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 		InlineKeyboard: [][]tb.InlineButton{navButtons, {interestedBtn}},
 	}
 
-	fh.bot.Edit(c.Callback().Message, eventText, markup, tb.ModeMarkdown)
+	_, err = fh.bot.Edit(c.Callback().Message, eventText, markup)
+	if err != nil {
+		logger.Error("Failed to edit next event message", err, logrus.Fields{
+			"chat_id": c.Callback().Message.Chat.ID,
+			"user_id": c.Sender().ID,
+		})
+	}
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
 
