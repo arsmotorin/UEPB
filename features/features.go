@@ -28,10 +28,12 @@ type FeatureHandler struct {
 	Btns        struct {
 		Student, Guest, Ads tb.InlineButton
 	}
-	adminHandler  interfaces.AdminHandlerInterface
-	eventsCache   []EventData
-	eventsCacheMu sync.RWMutex
-	cacheTime     time.Time
+	adminHandler     interfaces.AdminHandlerInterface
+	eventsCache      []EventData
+	eventsCacheMu    sync.RWMutex
+	cacheTime        time.Time
+	eventRateLimit   map[int64]time.Time
+	eventRateLimitMu sync.Mutex
 }
 
 // EventData stores event information
@@ -47,15 +49,16 @@ type EventData struct {
 // NewFeatureHandler creates a new feature handler
 func NewFeatureHandler(bot *tb.Bot, state interfaces.UserState, quiz interfaces.QuizInterface, blacklist interfaces.BlacklistInterface, adminChatID int64, violations map[int64]int, adminHandler interfaces.AdminHandlerInterface, btns struct{ Student, Guest, Ads tb.InlineButton }) *FeatureHandler {
 	return &FeatureHandler{
-		bot:          bot,
-		state:        state,
-		quiz:         quiz,
-		blacklist:    blacklist,
-		adminChatID:  adminChatID,
-		violations:   violations,
-		rateLimit:    make(map[int64]time.Time),
-		Btns:         btns,
-		adminHandler: adminHandler,
+		bot:            bot,
+		state:          state,
+		quiz:           quiz,
+		blacklist:      blacklist,
+		adminChatID:    adminChatID,
+		violations:     violations,
+		rateLimit:      make(map[int64]time.Time),
+		Btns:           btns,
+		adminHandler:   adminHandler,
+		eventRateLimit: make(map[int64]time.Time),
 	}
 }
 
@@ -588,6 +591,32 @@ func (fh *FeatureHandler) formatEventText(event EventData, index int, total int)
 
 // HandleEvent handles the /events command
 func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
+	isAdmin := fh.adminHandler != nil && fh.adminHandler.IsAdmin(c.Chat(), c.Sender())
+
+	if !isAdmin {
+		// Rate limiting for non-admin users
+		fh.eventRateLimitMu.Lock()
+		lastUsed, exists := fh.eventRateLimit[c.Sender().ID]
+		now := time.Now()
+
+		if exists && now.Sub(lastUsed) < 5*time.Minute {
+			remainingTime := 5*time.Minute - now.Sub(lastUsed)
+			remainingMinutes := int(remainingTime.Minutes())
+			remainingSeconds := int(remainingTime.Seconds()) % 60
+
+			fh.eventRateLimitMu.Unlock()
+
+			warnMsg, _ := fh.bot.Send(c.Chat(), fmt.Sprintf("⏱️ Команда /events доступна раз в 5 минут. Повтори через %d мин. %d сек.", remainingMinutes, remainingSeconds))
+			if fh.adminHandler != nil {
+				fh.adminHandler.DeleteAfter(warnMsg, 10*time.Second)
+			}
+			return nil
+		}
+
+		fh.eventRateLimit[c.Sender().ID] = now
+		fh.eventRateLimitMu.Unlock()
+	}
+
 	statusMsg, _ := fh.bot.Send(c.Chat(), "🔄 Загрузка событий...")
 
 	fh.eventsCacheMu.RLock()
