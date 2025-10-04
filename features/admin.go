@@ -101,12 +101,12 @@ func (ah *AdminHandler) BanUser(chat *tb.Chat, user *tb.User) error {
 
 // HandleBan handles the /banword command
 func (ah *AdminHandler) HandleBan(c tb.Context) error {
-	if !admin.IsAdminOrWarn(ah, c, "⛔ Команда /banword доступна только администрации.") {
+	if !admin.IsAdminOrWarn(ah, c, "ℹ Команда /banword доступна только администрации.") {
 		return nil
 	}
 	args := strings.Fields(c.Message().Text)
 	if len(args) < 2 {
-		admin.ReplyAndDelete(ah, c, "💡 Используй: /banword слово1 [слово2 ...]", 10*time.Second)
+		admin.ReplyAndDelete(ah, c, "ℹ Используй: /banword слово1 [слово2 ...]", 10*time.Second)
 		return nil
 	}
 	ah.blacklist.AddPhrase(args[1:])
@@ -117,7 +117,7 @@ func (ah *AdminHandler) HandleBan(c tb.Context) error {
 
 // HandleUnban handles the /unbanword command
 func (ah *AdminHandler) HandleUnban(c tb.Context) error {
-	if !admin.IsAdminOrWarn(ah, c, "⛔ Команда /unbanword доступна только администрации.") {
+	if !admin.IsAdminOrWarn(ah, c, "ℹ Команда /unbanword доступна только администрации.") {
 		return nil
 	}
 	args := strings.Fields(c.Message().Text)
@@ -137,7 +137,7 @@ func (ah *AdminHandler) HandleUnban(c tb.Context) error {
 
 // HandleListBan handles the /listbanword command
 func (ah *AdminHandler) HandleListBan(c tb.Context) error {
-	if !admin.IsAdminOrWarn(ah, c, "⛔ Команда /listbanword доступна только администрации.") {
+	if !admin.IsAdminOrWarn(ah, c, "ℹ Команда /listbanword доступна только администрации.") {
 		return nil
 	}
 	phrases := ah.blacklist.List()
@@ -202,7 +202,7 @@ func (ah *AdminHandler) BanUserEverywhere(user *tb.User) {
 
 // HandleSpamBan handles the /spamban command
 func (ah *AdminHandler) HandleSpamBan(c tb.Context) error {
-	if !admin.IsAdminOrWarn(ah, c, "⛔ Команда /spamban доступна только администрации.") {
+	if !admin.IsAdminOrWarn(ah, c, "ℹ Команда /spamban доступна только администрации.") {
 		return nil
 	}
 	targetUser := admin.ResolveTargetUser(ah, c)
