@@ -1290,8 +1290,11 @@ func (fh *FeatureHandler) RegisterGroup(chatID int64) {
 func (fh *FeatureHandler) StartEventBroadcaster() {
 	ticker := time.NewTicker(1 * time.Hour)
 
-	// Initial check
-	go fh.checkAndBroadcastEvents()
+	// Initial check and logging
+	go func() {
+		fh.logUpcomingEvents()
+		fh.checkAndBroadcastEvents()
+	}()
 
 	go func() {
 		for range ticker.C {
@@ -1300,6 +1303,98 @@ func (fh *FeatureHandler) StartEventBroadcaster() {
 	}()
 
 	logger.Info("Event broadcaster started (checking every hour)")
+}
+
+// logUpcomingEvents logs the next 10 upcoming events and their broadcast times
+func (fh *FeatureHandler) logUpcomingEvents() {
+	// Fetch latest events
+	err := fh.fetchEventsFromWebsite()
+	if err != nil {
+		logger.Error("Failed to fetch events for initial logging", err, nil)
+		return
+	}
+
+	fh.eventsCacheMu.RLock()
+	events := fh.eventsCache
+	fh.eventsCacheMu.RUnlock()
+
+	if len(events) == 0 {
+		logger.Info("No events found on the website")
+		return
+	}
+
+	logger.Info("UPCOMING EVENTS OVERVIEW:")
+
+	now := time.Now()
+	eventsToShow := 10
+	if len(events) < eventsToShow {
+		eventsToShow = len(events)
+	}
+
+	for i, event := range events[:eventsToShow] {
+		eventDate := fh.parseEventDate(event)
+
+		// Format event info
+		eventInfo := fmt.Sprintf("Event %d: %s", i+1, event.Title)
+
+		if !eventDate.IsZero() {
+			daysDiff := int(eventDate.Sub(now).Hours() / 24)
+			broadcastDate := eventDate.AddDate(0, 0, -5) // 5 days before event
+
+			eventInfo += fmt.Sprintf(" | Date: %s (%d days from now)",
+				eventDate.Format("2006-01-02"), daysDiff)
+
+			if daysDiff >= 5 {
+				eventInfo += fmt.Sprintf(" | Will broadcast: %s",
+					broadcastDate.Format("2006-01-02 15:04"))
+			} else if daysDiff >= 0 {
+				eventInfo += " | Too close to broadcast (less than 5 days)"
+			} else {
+				eventInfo += " | Event already passed"
+			}
+		} else {
+			eventInfo += " | Date: Unable to parse"
+		}
+
+		logger.Info(eventInfo)
+	}
+
+	// Show registered groups count
+	fh.registeredGroupsMu.RLock()
+	groupCount := len(fh.registeredGroups)
+	fh.registeredGroupsMu.RUnlock()
+
+	logger.Info(fmt.Sprintf("Total registered groups for broadcasting: %d", groupCount))
+
+	// Show next 5 days events
+	targetDates := []time.Time{}
+	for i := 1; i <= 5; i++ {
+		targetDates = append(targetDates, now.AddDate(0, 0, i))
+	}
+
+	logger.Info("EVENTS IN NEXT 5 DAYS:")
+	for i, targetDate := range targetDates {
+		dayEvents := []string{}
+
+		for _, event := range events {
+			eventDate := fh.parseEventDate(event)
+			if !eventDate.IsZero() &&
+				eventDate.Year() == targetDate.Year() &&
+				eventDate.Month() == targetDate.Month() &&
+				eventDate.Day() == targetDate.Day() {
+				dayEvents = append(dayEvents, event.Title)
+			}
+		}
+
+		dayInfo := fmt.Sprintf("Day +%d (%s): ", i, targetDate.Format("2006-01-02"))
+		if len(dayEvents) > 0 {
+			dayInfo += fmt.Sprintf("%d events - %s", len(dayEvents), strings.Join(dayEvents, ", "))
+		} else {
+			dayInfo += "No events"
+		}
+
+		logger.Info(dayInfo)
+	}
 }
 
 // checkAndBroadcastEvents checks for events happening in 5 days and broadcasts them
