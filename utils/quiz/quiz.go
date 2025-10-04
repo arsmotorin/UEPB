@@ -48,7 +48,7 @@ func DefaultQuiz() interfaces.QuizInterface {
 			{"1️⃣ Какую систему использует университет для управления обучением?",
 				[]tb.InlineButton{
 					CreateInlineButton("q1_usos", "USOS"),
-					CreateInlineButton("q1_uepp", "UEPP"),
+					CreateInlineButton("q1_edupl", "EDUPL"),
 					CreateInlineButton("q1_muci", "MUCI"),
 				},
 				"q1_usos"},
