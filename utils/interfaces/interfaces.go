@@ -70,10 +70,13 @@ type FeatureHandlerInterface interface {
 	HandleNextEvent(c tb.Context) error
 	HandleEventInterested(c tb.Context) error
 	HandleEventUnsubscribe(c tb.Context) error
+	HandleBroadcastInterested(c tb.Context) error
 	HandleStart(c tb.Context) error
 	HandlePrivateMessage(c tb.Context) error
 	RateLimit(handler func(tb.Context) error) func(tb.Context) error
 	RegisterQuizHandlers(bot *tb.Bot)
 	CreateQuizHandler(i int, q QuestionInterface, btn tb.InlineButton) func(tb.Context) error
 	FilterMessage(c tb.Context) error
+	RegisterGroup(chatID int64)
+	StartEventBroadcaster()
 }

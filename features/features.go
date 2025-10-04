@@ -46,6 +46,10 @@ type FeatureHandler struct {
 	activatedUsersMu     sync.RWMutex
 	eventMessageOwners   map[string]int64 // messageID -> userID who called /events
 	eventMessageOwnersMu sync.RWMutex
+	registeredGroups     map[int64]bool // chatID -> registered for broadcasts
+	registeredGroupsMu   sync.RWMutex
+	broadcastedEvents    map[string]bool // eventID -> already broadcasted
+	broadcastedEventsMu  sync.Mutex
 }
 
 // EventData stores event information
@@ -85,6 +89,8 @@ func NewFeatureHandler(bot *tb.Bot, state interfaces.UserState, quiz interfaces.
 		pendingActivations: make(map[int64]string),
 		activatedUsers:     make(map[int64]bool),
 		eventMessageOwners: make(map[string]int64),
+		registeredGroups:   make(map[int64]bool),
+		broadcastedEvents:  make(map[string]bool),
 	}
 }
 
@@ -216,6 +222,12 @@ func (fh *FeatureHandler) HandleUserJoined(c tb.Context) error {
 	if c.Message() == nil || c.Chat() == nil {
 		return nil
 	}
+
+	// Register group for event broadcasts
+	if c.Chat().Type == tb.ChatGroup || c.Chat().Type == tb.ChatSuperGroup {
+		fh.RegisterGroup(c.Chat().ID)
+	}
+
 	if reg, ok := fh.adminHandler.(interface{ RegisterGroup(*tb.Chat) }); ok {
 		reg.RegisterGroup(c.Chat())
 	}
@@ -502,6 +514,99 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 
 // EVENT FEATURES
 
+// Polish month data structure
+type polishMonth struct {
+	normalized string     // normalized form (genitive case)
+	timeMonth  time.Month // Go time.Month constant
+}
+
+// polishMonths maps various Polish month forms to their normalized data
+var polishMonths = map[string]polishMonth{
+	// January
+	"stycznia": {"stycznia", time.January},
+	"styczeń":  {"stycznia", time.January},
+	"styczen":  {"stycznia", time.January},
+	// February
+	"lutego": {"lutego", time.February},
+	"luty":   {"lutego", time.February},
+	// March
+	"marca":  {"marca", time.March},
+	"marzec": {"marca", time.March},
+	// April
+	"kwietnia": {"kwietnia", time.April},
+	"kwiecień": {"kwietnia", time.April},
+	"kwiecien": {"kwietnia", time.April},
+	// May
+	"maja": {"maja", time.May},
+	"maj":  {"maja", time.May},
+	// June
+	"czerwca":  {"czerwca", time.June},
+	"czerwiec": {"czerwca", time.June},
+	// July
+	"lipca":  {"lipca", time.July},
+	"lipiec": {"lipca", time.July},
+	// August
+	"sierpnia": {"sierpnia", time.August},
+	"sierpień": {"sierpnia", time.August},
+	"sierpien": {"sierpnia", time.August},
+	// September
+	"września": {"września", time.September},
+	"wrzesień": {"września", time.September},
+	"wrzesien": {"września", time.September},
+	// October
+	"października": {"października", time.October},
+	"październik":  {"października", time.October},
+	"pazdziernik":  {"października", time.October},
+	// November
+	"listopada": {"listopada", time.November},
+	"listopad":  {"listopada", time.November},
+	// December
+	"grudnia":  {"grudnia", time.December},
+	"grudzień": {"grudnia", time.December},
+	"grudzien": {"grudnia", time.December},
+}
+
+// escapeMarkdown escapes special Markdown characters
+func escapeMarkdown(text string) string {
+	replacer := strings.NewReplacer(
+		"_", "\\_",
+		"*", "\\*",
+		"[", "\\[",
+		"`", "\\`",
+	)
+	return replacer.Replace(text)
+}
+
+// normalizeMonthName extracts and normalizes Polish month name
+func normalizeMonthName(monthStr string) string {
+	monthName := strings.TrimSpace(monthStr)
+	if strings.Contains(monthName, " ") {
+		parts := strings.Split(monthName, " ")
+		monthName = parts[0]
+	}
+	monthName = strings.ToLower(monthName)
+
+	if monthData, exists := polishMonths[monthName]; exists {
+		return monthData.normalized
+	}
+	return monthName // return original if not found
+}
+
+// parseMonthToTime converts Polish month name to time.Month
+func parseMonthToTime(monthStr string) (time.Month, bool) {
+	monthName := strings.TrimSpace(monthStr)
+	if strings.Contains(monthName, " ") {
+		parts := strings.Split(monthName, " ")
+		monthName = parts[0]
+	}
+	monthName = strings.ToLower(monthName)
+
+	if monthData, exists := polishMonths[monthName]; exists {
+		return monthData.timeMonth, true
+	}
+	return 0, false
+}
+
 // fetchEventsFromWebsite fetches events from the UE Poznan website
 func (fh *FeatureHandler) fetchEventsFromWebsite() error {
 	// Create HTTP client with custom transport to skip certificate verification
@@ -600,32 +705,18 @@ func (fh *FeatureHandler) formatEventText(event EventData, index int, total int)
 			timeStr = strings.TrimSpace(timeStr)
 		}
 
-		monthName := event.Month
-		if strings.Contains(monthName, " ") {
-			parts := strings.Split(monthName, " ")
-			monthName = strings.ToLower(parts[0])
-		}
+		// Normalize Polish month name
+		normalizedMonth := normalizeMonthName(event.Month)
 
 		if timeStr != "" {
-			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", escapeMarkdown(event.Day), escapeMarkdown(monthName), escapeMarkdown(timeStr)))
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", escapeMarkdown(event.Day), escapeMarkdown(normalizedMonth), escapeMarkdown(timeStr)))
 		} else {
-			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s", escapeMarkdown(event.Day), escapeMarkdown(monthName)))
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s", escapeMarkdown(event.Day), escapeMarkdown(normalizedMonth)))
 		}
 	}
 
 	result.WriteString(fmt.Sprintf("\n\nWydarzenie %d z %d", index+1, total))
 	return result.String()
-}
-
-// escapeMarkdown escapes special Markdown characters
-func escapeMarkdown(text string) string {
-	replacer := strings.NewReplacer(
-		"_", "\\_",
-		"*", "\\*",
-		"[", "\\[",
-		"`", "\\`",
-	)
-	return replacer.Replace(text)
 }
 
 // HandleEvent handles the /events command (only in private chats)
@@ -904,7 +995,7 @@ func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
 		return nil
 	}
 
-	// Check if the user is the owner of this message
+	// Check the user is the owner of this message
 	messageKey := fmt.Sprintf("%d_%d", c.Callback().Message.Chat.ID, c.Callback().Message.ID)
 	fh.eventMessageOwnersMu.RLock()
 	ownerID, exists := fh.eventMessageOwners[messageKey]
@@ -1027,6 +1118,40 @@ func (fh *FeatureHandler) HandleStart(c tb.Context) error {
 	fh.activatedUsers[userID] = true
 	fh.activatedUsersMu.Unlock()
 
+	// Check for pending activation
+	fh.pendingActivationsMu.Lock()
+	eventID, hasPending := fh.pendingActivations[userID]
+	if hasPending {
+		delete(fh.pendingActivations, userID)
+	}
+	fh.pendingActivationsMu.Unlock()
+
+	if hasPending {
+		// Register user's interest in the event
+		fh.eventInterestsMu.Lock()
+		if fh.eventInterests[eventID] == nil {
+			fh.eventInterests[eventID] = []int64{}
+		}
+		fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
+		fh.eventInterestsMu.Unlock()
+
+		fh.userEventInterestsMu.Lock()
+		if fh.userEventInterests[userID] == nil {
+			fh.userEventInterests[userID] = make(map[string]bool)
+		}
+		fh.userEventInterests[userID][eventID] = true
+		fh.userEventInterestsMu.Unlock()
+
+		_, err := fh.bot.Send(c.Chat(), "✅ Ты успешно подписался на событие.")
+
+		logger.Info("User subscribed to event via start", logrus.Fields{
+			"user_id":  userID,
+			"event_id": eventID,
+		})
+
+		return err
+	}
+
 	// Regular start message
 	_, err := fh.bot.Send(c.Chat(),
 		"👋 Привет! Я – бот студенческой группы UEP.\n\nНачни вводить команды с / и я тебе покажу, что могу делать",
@@ -1056,6 +1181,40 @@ func (fh *FeatureHandler) HandlePrivateMessage(c tb.Context) error {
 	fh.activatedUsersMu.Lock()
 	fh.activatedUsers[userID] = true
 	fh.activatedUsersMu.Unlock()
+
+	// Check for pending activation
+	fh.pendingActivationsMu.Lock()
+	eventID, hasPending := fh.pendingActivations[userID]
+	if hasPending {
+		delete(fh.pendingActivations, userID)
+	}
+	fh.pendingActivationsMu.Unlock()
+
+	if hasPending {
+		// Register user's interest in the event
+		fh.eventInterestsMu.Lock()
+		if fh.eventInterests[eventID] == nil {
+			fh.eventInterests[eventID] = []int64{}
+		}
+		fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
+		fh.eventInterestsMu.Unlock()
+
+		fh.userEventInterestsMu.Lock()
+		if fh.userEventInterests[userID] == nil {
+			fh.userEventInterests[userID] = make(map[string]bool)
+		}
+		fh.userEventInterests[userID][eventID] = true
+		fh.userEventInterestsMu.Unlock()
+
+		_, err := fh.bot.Send(c.Chat(), "✅ Ты успешно подписался на событие.")
+
+		logger.Info("User subscribed to event via message", logrus.Fields{
+			"user_id":  userID,
+			"event_id": eventID,
+		})
+
+		return err
+	}
 
 	return nil
 }
@@ -1114,4 +1273,282 @@ func (fh *FeatureHandler) HandleEventUnsubscribe(c tb.Context) error {
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
 		Text: "Ты отписался от уведомлений",
 	})
+}
+
+// RegisterGroup registers a group chat for event broadcasting
+func (fh *FeatureHandler) RegisterGroup(chatID int64) {
+	fh.registeredGroupsMu.Lock()
+	fh.registeredGroups[chatID] = true
+	fh.registeredGroupsMu.Unlock()
+
+	logger.Info("Group registered for event broadcasts", logrus.Fields{
+		"chat_id": chatID,
+	})
+}
+
+// StartEventBroadcaster starts hourly event checker
+func (fh *FeatureHandler) StartEventBroadcaster() {
+	ticker := time.NewTicker(1 * time.Hour)
+
+	// Initial check
+	go fh.checkAndBroadcastEvents()
+
+	go func() {
+		for range ticker.C {
+			fh.checkAndBroadcastEvents()
+		}
+	}()
+
+	logger.Info("Event broadcaster started (checking every hour)")
+}
+
+// checkAndBroadcastEvents checks for events happening in 5 days and broadcasts them
+func (fh *FeatureHandler) checkAndBroadcastEvents() {
+	// Fetch latest events
+	err := fh.fetchEventsFromWebsite()
+	if err != nil {
+		logger.Error("Failed to fetch events for broadcasting", err, nil)
+		return
+	}
+
+	fh.eventsCacheMu.RLock()
+	events := fh.eventsCache
+	fh.eventsCacheMu.RUnlock()
+
+	if len(events) == 0 {
+		return
+	}
+
+	// Calculate target date (5 days from now)
+	targetDate := time.Now().AddDate(0, 0, 5)
+
+	// Find events happening in 5 days
+	for _, event := range events {
+		eventDate := fh.parseEventDate(event)
+		if eventDate.IsZero() {
+			continue
+		}
+
+		// Check if event is on target date (same day)
+		if eventDate.Year() == targetDate.Year() &&
+			eventDate.Month() == targetDate.Month() &&
+			eventDate.Day() == targetDate.Day() {
+
+			eventID := event.GetEventID()
+
+			// Check if already broadcasted
+			fh.broadcastedEventsMu.Lock()
+			if fh.broadcastedEvents[eventID] {
+				fh.broadcastedEventsMu.Unlock()
+				continue
+			}
+			fh.broadcastedEvents[eventID] = true
+			fh.broadcastedEventsMu.Unlock()
+
+			// Broadcast this event
+			fh.broadcastEventToGroups(event)
+		}
+	}
+}
+
+// parseEventDate parses event date from Day and Month fields
+func (fh *FeatureHandler) parseEventDate(event EventData) time.Time {
+	if event.Day == "" || event.Month == "" {
+		return time.Time{}
+	}
+
+	// Parse day
+	var day int
+	_, err := fmt.Sscanf(event.Day, "%d", &day)
+	if err != nil {
+		return time.Time{}
+	}
+
+	// Parse month
+	month, ok := parseMonthToTime(event.Month)
+	if !ok {
+		return time.Time{}
+	}
+
+	// Use current year
+	year := time.Now().Year()
+
+	return time.Date(year, month, day, 0, 0, 0, 0, time.Local)
+}
+
+// broadcastEventToGroups sends event to all registered groups
+func (fh *FeatureHandler) broadcastEventToGroups(event EventData) {
+	eventID := event.GetEventID()
+	eventText := fh.formatBroadcastEventText(event)
+
+	// Create "Интересует" button
+	interestedBtn := tb.InlineButton{
+		Unique: "broadcast_interested",
+		Text:   "Интересует 🔔",
+		Data:   fmt.Sprintf("bcast_%s", eventID),
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{{interestedBtn}},
+	}
+
+	// Get all registered groups
+	fh.registeredGroupsMu.RLock()
+	groupIDs := make([]int64, 0, len(fh.registeredGroups))
+	for chatID := range fh.registeredGroups {
+		groupIDs = append(groupIDs, chatID)
+	}
+	fh.registeredGroupsMu.RUnlock()
+
+	logger.Info("Broadcasting event to groups", logrus.Fields{
+		"event_id":    eventID,
+		"event_title": event.Title,
+		"groups":      len(groupIDs),
+	})
+
+	// Broadcast to all groups
+	for _, chatID := range groupIDs {
+		chat := &tb.Chat{ID: chatID}
+		_, err := fh.bot.Send(chat, eventText, markup, tb.ModeMarkdown)
+		if err != nil {
+			logger.Error("Failed to broadcast event to group", err, logrus.Fields{
+				"chat_id":  chatID,
+				"event_id": eventID,
+			})
+		} else {
+			logger.Info("Event broadcasted successfully", logrus.Fields{
+				"chat_id":  chatID,
+				"event_id": eventID,
+			})
+		}
+	}
+}
+
+// formatBroadcastEventText formats event for group broadcast
+func (fh *FeatureHandler) formatBroadcastEventText(event EventData) string {
+	var result strings.Builder
+
+	result.WriteString(fmt.Sprintf("📰 %s\n\n", escapeMarkdown(event.Title)))
+
+	if event.Description != "" {
+		desc := strings.ReplaceAll(event.Description, "\n\n\n", "\n\n")
+		desc = strings.TrimSpace(desc)
+
+		// Limit description for broadcast
+		if len(desc) > 500 {
+			desc = desc[:500] + "..."
+		}
+
+		trainingScheduleURL := "https://app.ue.poznan.pl/TrainingsSchedule/Account/Login?ReturnUrl=%2fTrainingsSchedule%2f"
+		lines := strings.Split(desc, "\n")
+		for i, line := range lines {
+			trimmedLine := strings.TrimSpace(line)
+			if trimmedLine == "Więcej informacji" {
+				lines[i] = fmt.Sprintf("[Więcej informacji](%s)", trainingScheduleURL)
+			} else {
+				lines[i] = escapeMarkdown(line)
+			}
+		}
+		desc = strings.Join(lines, "\n")
+
+		result.WriteString(fmt.Sprintf("%s\n\n", desc))
+	}
+
+	if event.Day != "" {
+		timeStr := ""
+		if event.Time != "" {
+			timeStr = strings.TrimSpace(event.Time)
+			timeStr = strings.TrimSuffix(timeStr, "-")
+			timeStr = strings.TrimSpace(timeStr)
+		}
+
+		// Normalize Polish month name
+		normalizedMonth := normalizeMonthName(event.Month)
+
+		if timeStr != "" {
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", escapeMarkdown(event.Day), escapeMarkdown(normalizedMonth), escapeMarkdown(timeStr)))
+		} else {
+			result.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s", escapeMarkdown(event.Day), escapeMarkdown(normalizedMonth)))
+		}
+	}
+
+	return result.String()
+}
+
+// HandleBroadcastInterested handles "Интересует" button from broadcast
+func (fh *FeatureHandler) HandleBroadcastInterested(c tb.Context) error {
+	if c.Callback() == nil || c.Sender() == nil {
+		return nil
+	}
+
+	eventID := strings.TrimPrefix(c.Callback().Data, "bcast_")
+	userID := c.Sender().ID
+
+	// Check if already subscribed
+	fh.userEventInterestsMu.RLock()
+	userInterests, existsInterest := fh.userEventInterests[userID]
+	alreadyInterested := existsInterest && userInterests[eventID]
+	fh.userEventInterestsMu.RUnlock()
+
+	if alreadyInterested {
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+			Text:      "Ты уже подписан на это событие",
+			ShowAlert: false,
+		})
+	}
+
+	// Check if user activated bot
+	fh.activatedUsersMu.RLock()
+	isActivated := fh.activatedUsers[userID]
+	fh.activatedUsersMu.RUnlock()
+
+	if isActivated {
+		// User activated, subscribe immediately
+		fh.eventInterestsMu.Lock()
+		if fh.eventInterests[eventID] == nil {
+			fh.eventInterests[eventID] = []int64{}
+		}
+		fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
+		fh.eventInterestsMu.Unlock()
+
+		fh.userEventInterestsMu.Lock()
+		if fh.userEventInterests[userID] == nil {
+			fh.userEventInterests[userID] = make(map[string]bool)
+		}
+		fh.userEventInterests[userID][eventID] = true
+		fh.userEventInterestsMu.Unlock()
+
+		logger.Info("User subscribed to broadcast event", logrus.Fields{
+			"user_id":  userID,
+			"event_id": eventID,
+		})
+
+		// Send confirmation to private chat
+		privateChat := &tb.Chat{ID: userID}
+		_, err := fh.bot.Send(privateChat, "✅ Ты успешно подписался на событие.")
+		if err != nil {
+			return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
+				Text:      "✅ Ты успешно подписался на событие!",
+				ShowAlert: true,
+			})
+		}
+
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
+	}
+
+	// User not activated, prompt to activate
+	fh.pendingActivationsMu.Lock()
+	fh.pendingActivations[userID] = eventID
+	fh.pendingActivationsMu.Unlock()
+
+	warnMsg, _ := fh.bot.Send(c.Chat(), fmt.Sprintf(
+		"⚠️ %s, для подписки на событие активируй бота в личных сообщениях.",
+		fh.adminHandler.GetUserDisplayName(c.Sender()),
+	))
+
+	if fh.adminHandler != nil {
+		fh.adminHandler.DeleteAfter(warnMsg, 15*time.Second)
+	}
+
+	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }

@@ -76,11 +76,13 @@ func (h *Handler) Register() {
 	nextEventBtn := tb.InlineButton{Unique: "next_event"}
 	interestedBtn := tb.InlineButton{Unique: "event_interested"}
 	unsubscribeBtn := tb.InlineButton{Unique: "event_unsubscribe"}
+	broadcastInterestedBtn := tb.InlineButton{Unique: "broadcast_interested"}
 
 	h.bot.Handle(&prevEventBtn, h.featureHandler.HandlePrevEvent)
 	h.bot.Handle(&nextEventBtn, h.featureHandler.HandleNextEvent)
 	h.bot.Handle(&interestedBtn, h.featureHandler.HandleEventInterested)
 	h.bot.Handle(&unsubscribeBtn, h.featureHandler.HandleEventUnsubscribe)
+	h.bot.Handle(&broadcastInterestedBtn, h.featureHandler.HandleBroadcastInterested)
 
 	// Quiz handlers
 	h.featureHandler.RegisterQuizHandlers(h.bot)
@@ -101,6 +103,9 @@ func (h *Handler) Register() {
 
 	// Set bot commands
 	h.setBotCommands()
+
+	// Start event broadcaster (checks for events in 5 days every hour)
+	h.featureHandler.StartEventBroadcaster()
 }
 
 // handleTextMessage handles all text messages
