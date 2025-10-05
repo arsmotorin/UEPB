@@ -1105,6 +1105,67 @@ func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
 
+// sendEventSubscriptionConfirmation sends a detailed confirmation message to the user
+func (fh *FeatureHandler) sendEventSubscriptionConfirmation(chat *tb.Chat, eventID string) error {
+	// Find the event details
+	fh.eventsCacheMu.RLock()
+	var currentEvent *EventData
+	for i := range fh.eventsCache {
+		if fh.eventsCache[i].GetEventID() == eventID {
+			currentEvent = &fh.eventsCache[i]
+			break
+		}
+	}
+	fh.eventsCacheMu.RUnlock()
+
+	if currentEvent == nil {
+		// If event not found in the cache, send simple confirmation
+		_, err := fh.bot.Send(chat, "✅ Ты успешно подписался на событие.")
+		return err
+	}
+
+	// Format event time info
+	eventTimeInfo := ""
+	if currentEvent.Day != "" && currentEvent.Month != "" {
+		monthName := currentEvent.Month
+		if strings.Contains(monthName, " ") {
+			parts := strings.Split(monthName, " ")
+			monthName = strings.ToLower(parts[0])
+		}
+
+		if currentEvent.Time != "" {
+			timeStr := strings.TrimSpace(currentEvent.Time)
+			timeStr = strings.TrimSuffix(timeStr, "-")
+			timeStr = strings.TrimSpace(timeStr)
+			eventTimeInfo = fmt.Sprintf("%s %s в %s", currentEvent.Day, monthName, timeStr)
+		} else {
+			eventTimeInfo = fmt.Sprintf("%s %s", currentEvent.Day, monthName)
+		}
+	}
+
+	unsubBtn := tb.InlineButton{
+		Unique: "event_unsubscribe",
+		Text:   "Больше не интересно ❌",
+		Data:   fmt.Sprintf("unsub_%s", eventID),
+	}
+
+	markup := &tb.ReplyMarkup{
+		InlineKeyboard: [][]tb.InlineButton{{unsubBtn}},
+	}
+
+	confirmText := fmt.Sprintf(
+		"✅ Ты успешно подписался на событие.\n\n"+
+			"Событие: %s\n"+
+			"Время: %s\n\n"+
+			"Я пришлю тебе напоминания за сутки и за 2 часа до начала.",
+		currentEvent.Title,
+		eventTimeInfo,
+	)
+
+	_, err := fh.bot.Send(chat, confirmText, markup)
+	return err
+}
+
 // HandleStart handles /start command
 func (fh *FeatureHandler) HandleStart(c tb.Context) error {
 	if c.Chat().Type != tb.ChatPrivate || c.Sender() == nil {
@@ -1142,7 +1203,7 @@ func (fh *FeatureHandler) HandleStart(c tb.Context) error {
 		fh.userEventInterests[userID][eventID] = true
 		fh.userEventInterestsMu.Unlock()
 
-		_, err := fh.bot.Send(c.Chat(), "✅ Ты успешно подписался на событие.")
+		err := fh.sendEventSubscriptionConfirmation(c.Chat(), eventID)
 
 		logger.Info("User subscribed to event via start", logrus.Fields{
 			"user_id":  userID,
@@ -1206,7 +1267,7 @@ func (fh *FeatureHandler) HandlePrivateMessage(c tb.Context) error {
 		fh.userEventInterests[userID][eventID] = true
 		fh.userEventInterestsMu.Unlock()
 
-		_, err := fh.bot.Send(c.Chat(), "✅ Ты успешно подписался на событие.")
+		err := fh.sendEventSubscriptionConfirmation(c.Chat(), eventID)
 
 		logger.Info("User subscribed to event via message", logrus.Fields{
 			"user_id":  userID,
@@ -1618,9 +1679,8 @@ func (fh *FeatureHandler) HandleBroadcastInterested(c tb.Context) error {
 			"event_id": eventID,
 		})
 
-		// Send confirmation to private chat
 		privateChat := &tb.Chat{ID: userID}
-		_, err := fh.bot.Send(privateChat, "✅ Ты успешно подписался на событие.")
+		err := fh.sendEventSubscriptionConfirmation(privateChat, eventID)
 		if err != nil {
 			return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
 				Text:      "✅ Ты успешно подписался на событие!",
