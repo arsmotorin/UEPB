@@ -1653,57 +1653,63 @@ func (fh *FeatureHandler) HandleBroadcastInterested(c tb.Context) error {
 		})
 	}
 
-	// Check if user activated bot
-	fh.activatedUsersMu.RLock()
-	isActivated := fh.activatedUsers[userID]
-	fh.activatedUsersMu.RUnlock()
+	// Try to send confirmation to private chat first (regardless of activation status)
+	privateChat := &tb.Chat{ID: userID}
+	err := fh.sendEventSubscriptionConfirmation(privateChat, eventID)
 
-	if isActivated {
-		// User activated, subscribe immediately
-		fh.eventInterestsMu.Lock()
-		if fh.eventInterests[eventID] == nil {
-			fh.eventInterests[eventID] = []int64{}
-		}
-		fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
-		fh.eventInterestsMu.Unlock()
-
-		fh.userEventInterestsMu.Lock()
-		if fh.userEventInterests[userID] == nil {
-			fh.userEventInterests[userID] = make(map[string]bool)
-		}
-		fh.userEventInterests[userID][eventID] = true
-		fh.userEventInterestsMu.Unlock()
-
-		logger.Info("User subscribed to broadcast event", logrus.Fields{
+	if err != nil {
+		// Failed to send message, bot is blocked or chat was deleted
+		logger.Warn("Failed to send message to user, requesting activation", logrus.Fields{
 			"user_id":  userID,
 			"event_id": eventID,
+			"error":    err.Error(),
 		})
 
-		privateChat := &tb.Chat{ID: userID}
-		err := fh.sendEventSubscriptionConfirmation(privateChat, eventID)
-		if err != nil {
-			return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{
-				Text:      "✅ Ты успешно подписался на событие!",
-				ShowAlert: true,
-			})
+		// Mark as not activated
+		fh.activatedUsersMu.Lock()
+		delete(fh.activatedUsers, userID)
+		fh.activatedUsersMu.Unlock()
+
+		// Add to pending activations
+		fh.pendingActivationsMu.Lock()
+		fh.pendingActivations[userID] = eventID
+		fh.pendingActivationsMu.Unlock()
+
+		warnMsg, _ := fh.bot.Send(c.Chat(), fmt.Sprintf(
+			"⚠️ %s, для подписки на событие активируй бота в личных сообщениях.",
+			fh.adminHandler.GetUserDisplayName(c.Sender()),
+		))
+
+		if fh.adminHandler != nil {
+			fh.adminHandler.DeleteAfter(warnMsg, 15*time.Second)
 		}
 
 		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 	}
 
-	// User not activated, prompt to activate
-	fh.pendingActivationsMu.Lock()
-	fh.pendingActivations[userID] = eventID
-	fh.pendingActivationsMu.Unlock()
+	// Message sent successfully, subscribe user to event
+	fh.activatedUsersMu.Lock()
+	fh.activatedUsers[userID] = true
+	fh.activatedUsersMu.Unlock()
 
-	warnMsg, _ := fh.bot.Send(c.Chat(), fmt.Sprintf(
-		"⚠️ %s, для подписки на событие активируй бота в личных сообщениях.",
-		fh.adminHandler.GetUserDisplayName(c.Sender()),
-	))
-
-	if fh.adminHandler != nil {
-		fh.adminHandler.DeleteAfter(warnMsg, 15*time.Second)
+	fh.eventInterestsMu.Lock()
+	if fh.eventInterests[eventID] == nil {
+		fh.eventInterests[eventID] = []int64{}
 	}
+	fh.eventInterests[eventID] = append(fh.eventInterests[eventID], userID)
+	fh.eventInterestsMu.Unlock()
+
+	fh.userEventInterestsMu.Lock()
+	if fh.userEventInterests[userID] == nil {
+		fh.userEventInterests[userID] = make(map[string]bool)
+	}
+	fh.userEventInterests[userID][eventID] = true
+	fh.userEventInterestsMu.Unlock()
+
+	logger.Info("User subscribed to broadcast event", logrus.Fields{
+		"user_id":  userID,
+		"event_id": eventID,
+	})
 
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
