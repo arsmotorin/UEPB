@@ -1,4 +1,4 @@
-package interfaces
+package core
 
 import (
 	"time"
@@ -6,7 +6,7 @@ import (
 	tb "gopkg.in/telebot.v4"
 )
 
-// UserState interface for state management
+// UserState manages per-user quiz progress and newbie status
 type UserState interface {
 	InitUser(id int)
 	IncCorrect(id int)
@@ -17,19 +17,19 @@ type UserState interface {
 	IsNewbie(id int) bool
 }
 
-// QuestionInterface interface for quiz questions
+// QuestionInterface single quiz question
 type QuestionInterface interface {
 	GetText() string
 	GetButtons() []tb.InlineButton
 	GetAnswer() string
 }
 
-// QuizInterface interface for quiz
+// QuizInterface collection of questions
 type QuizInterface interface {
 	GetQuestions() []QuestionInterface
 }
 
-// BlacklistInterface interface for blocklist functionality
+// BlacklistInterface operations for banned phrases
 type BlacklistInterface interface {
 	AddPhrase(words []string)
 	RemovePhrase(words []string) bool
@@ -37,7 +37,7 @@ type BlacklistInterface interface {
 	CheckMessage(msg string) bool
 }
 
-// AdminHandlerInterface interface for admin functionality
+// AdminHandlerInterface admin tools
 type AdminHandlerInterface interface {
 	LogToAdmin(message string)
 	IsAdmin(chat *tb.Chat, user *tb.User) bool
@@ -54,7 +54,7 @@ type AdminHandlerInterface interface {
 	Bot() *tb.Bot
 }
 
-// FeatureHandlerInterface interface for feature functionality
+// FeatureHandlerInterface high-level feature endpoints
 type FeatureHandlerInterface interface {
 	OnlyNewbies(handler func(tb.Context) error) func(tb.Context) error
 	SendOrEdit(chat *tb.Chat, msg *tb.Message, text string, rm *tb.ReplyMarkup) *tb.Message

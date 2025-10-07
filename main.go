@@ -5,48 +5,125 @@ import (
 	"strconv"
 	"time"
 
-	"UEPB/utils/handlers"
-	"UEPB/utils/logger"
+	"UEPB/internal/bot"
+	"UEPB/internal/core"
 
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
 )
 
-// Start bot
-func main() {
-	logger.Info("Bot is starting...")
+// Handler aggregates bot dependencies
+type Handler struct {
+	bot            *tb.Bot
+	state          core.UserState
+	quiz           core.QuizInterface
+	blacklist      core.BlacklistInterface
+	adminChatID    int64
+	violations     map[int64]int
+	adminHandler   core.AdminHandlerInterface
+	featureHandler core.FeatureHandlerInterface
+	Btns           struct{ Student, Guest, Ads tb.InlineButton }
+}
 
-	// Load .env file
+func main() {
+	logrus.Info("Bot is starting...")
 	_ = godotenv.Load()
 	token := os.Getenv("BOT_TOKEN")
 	if token == "" {
-		logger.Logger.Fatal("BOT_TOKEN is required in .env file")
+		logrus.Fatal("BOT_TOKEN missing")
 	}
-
 	adminChatIDStr := os.Getenv("ADMIN_CHAT_ID")
 	if adminChatIDStr == "" {
-		logger.Logger.Fatal("ADMIN_CHAT_ID is required in .env file")
+		logrus.Fatal("ADMIN_CHAT_ID missing")
 	}
-
 	adminChatID, err := strconv.ParseInt(adminChatIDStr, 10, 64)
 	if err != nil {
-		logger.Logger.WithField("admin_chat_id", adminChatIDStr).Fatal("ADMIN_CHAT_ID must be a valid integer")
+		logrus.Fatal("ADMIN_CHAT_ID invalid")
 	}
-
-	bot, err := tb.NewBot(tb.Settings{Token: token, Poller: &tb.LongPoller{Timeout: 10 * time.Second}})
+	b, err := tb.NewBot(tb.Settings{Token: token, Poller: &tb.LongPoller{Timeout: 10 * time.Second}})
 	if err != nil {
-		logger.Error("Failed to create bot", err, logrus.Fields{
-			"token_length": len(token),
-		})
-		logger.Logger.Fatal(err)
+		logrus.WithError(err).Fatal("bot create failed")
 	}
-
-	h := handlers.NewHandler(bot, adminChatID)
+	h := NewHandler(b, adminChatID)
 	h.Register()
+	logrus.WithField("admin_chat_id", adminChatID).Info("Bot started")
+	b.Start()
+}
 
-	logger.Info("Bot has started successfully!", logrus.Fields{
-		"admin_chat_id": adminChatID,
-	})
-	bot.Start()
+// NewHandler wires dependencies
+func NewHandler(b *tb.Bot, adminChatID int64) *Handler {
+	violations := make(map[int64]int)
+	state := core.NewState()
+	quiz := bot.DefaultQuiz()
+	black := bot.NewBlacklist("blacklist.json")
+
+	h := &Handler{bot: b, state: state, quiz: quiz, blacklist: black, adminChatID: adminChatID, violations: violations}
+
+	// Buttons
+	h.Btns.Student = bot.StudentButton()
+	h.Btns.Guest = bot.GuestButton()
+	h.Btns.Ads = bot.AdsButton()
+
+	// Admin
+	adminHandler := bot.NewAdminHandler(b, black, adminChatID, violations)
+	h.adminHandler = adminHandler
+
+	// Feature
+	featureHandler := bot.NewFeatureHandler(b, state, quiz, black, adminChatID, violations, adminHandler, h.Btns)
+	h.featureHandler = featureHandler
+	return h
+}
+
+// Register sets handlers
+func (h *Handler) Register() {
+	h.bot.Handle(tb.OnUserJoined, h.featureHandler.HandleUserJoined)
+	h.bot.Handle(tb.OnUserLeft, h.featureHandler.HandleUserLeft)
+	h.bot.Handle(&h.Btns.Student, h.featureHandler.OnlyNewbies(h.featureHandler.HandleStudent))
+	h.bot.Handle(&h.Btns.Guest, h.featureHandler.OnlyNewbies(h.featureHandler.HandleGuest))
+	h.bot.Handle(&h.Btns.Ads, h.featureHandler.OnlyNewbies(h.featureHandler.HandleAds))
+	prevEventBtn := tb.InlineButton{Unique: "prev_event"}
+	nextEventBtn := tb.InlineButton{Unique: "next_event"}
+	interestedBtn := tb.InlineButton{Unique: "event_interested"}
+	unsubscribeBtn := tb.InlineButton{Unique: "event_unsubscribe"}
+	broadcastInterestedBtn := tb.InlineButton{Unique: "broadcast_interested"}
+	h.bot.Handle(&prevEventBtn, h.featureHandler.HandlePrevEvent)
+	h.bot.Handle(&nextEventBtn, h.featureHandler.HandleNextEvent)
+	h.bot.Handle(&interestedBtn, h.featureHandler.HandleEventInterested)
+	h.bot.Handle(&unsubscribeBtn, h.featureHandler.HandleEventUnsubscribe)
+	h.bot.Handle(&broadcastInterestedBtn, h.featureHandler.HandleBroadcastInterested)
+	h.featureHandler.RegisterQuizHandlers(h.bot)
+	h.bot.Handle("/banword", h.adminHandler.HandleBan)
+	h.bot.Handle("/unbanword", h.adminHandler.HandleUnban)
+	h.bot.Handle("/listbanword", h.adminHandler.HandleListBan)
+	h.bot.Handle("/spamban", h.adminHandler.HandleSpamBan)
+	h.bot.Handle("/ping", h.featureHandler.RateLimit(h.featureHandler.HandlePing))
+	h.bot.Handle("/events", h.featureHandler.HandleEvent)
+	h.bot.Handle("/start", h.featureHandler.HandleStart)
+	h.bot.Handle(tb.OnText, h.handleTextMessage)
+	h.setBotCommands()
+	h.featureHandler.StartEventBroadcaster()
+}
+
+// handleTextMessage handles text messages
+func (h *Handler) handleTextMessage(c tb.Context) error {
+	if c.Chat().Type == tb.ChatPrivate {
+		if err := h.featureHandler.HandlePrivateMessage(c); err != nil {
+			return err
+		}
+	}
+	return h.featureHandler.FilterMessage(c)
+}
+
+// setBotCommands sets bot commands
+func (h *Handler) setBotCommands() {
+	commands := []tb.Command{
+		{Text: "events", Description: "Узнать о событиях университета"},
+		{Text: "ping", Description: "Проверить отклик бота"},
+		{Text: "banword", Description: "Добавить запрещённое слово"},
+		{Text: "unbanword", Description: "Удалить запрещённое слово"},
+		{Text: "listbanword", Description: "Показать список запрещённых слов"},
+		{Text: "spamban", Description: "Забанить пользователя за спам"},
+	}
+	_ = h.bot.SetCommands(commands)
 }
