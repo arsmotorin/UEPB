@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"UEPB/internal/i18n"
+
 	"github.com/PuerkitoBio/goquery"
 	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
@@ -107,7 +109,10 @@ func (fh *FeatureHandler) fetchEventsFromWebsite() error {
 }
 
 // formatEventText formats one event
-func (fh *FeatureHandler) formatEventText(event EventData, index, total int) string {
+func (fh *FeatureHandler) formatEventText(event EventData, index, total int, user *tb.User) string {
+	lang := fh.getLangForUser(user)
+	msgs := i18n.Get().T(lang)
+
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("📰 %s\n\n", escapeMarkdown(event.Title)))
 	if event.Description != "" {
@@ -133,19 +138,22 @@ func (fh *FeatureHandler) formatEventText(event EventData, index, total int) str
 		}
 		nm := normalizeMonthName(event.Month)
 		if timeStr != "" {
-			b.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s %s", escapeMarkdown(event.Day), escapeMarkdown(nm), escapeMarkdown(timeStr)))
+			b.WriteString(fmt.Sprintf(msgs.Events.WillHappen, escapeMarkdown(event.Day), escapeMarkdown(nm), escapeMarkdown(timeStr)))
 		} else {
-			b.WriteString(fmt.Sprintf("🕒 Wydarzenie odbędzie się %s %s", escapeMarkdown(event.Day), escapeMarkdown(nm)))
+			b.WriteString(fmt.Sprintf(msgs.Events.WillHappenNoTime, escapeMarkdown(event.Day), escapeMarkdown(nm)))
 		}
 	}
-	b.WriteString(fmt.Sprintf("\n\nWydarzenie %d z %d", index+1, total))
+	b.WriteString(fmt.Sprintf("\n\n"+msgs.Events.EventNumber, index+1, total))
 	return b.String()
 }
 
 // HandleEvent handles /events in private chat
 func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Chat().Type != tb.ChatPrivate {
-		warnMsg, _ := fh.bot.Send(c.Chat(), "ℹ️ Команда /events доступна только в личных сообщениях с ботом.")
+		warnMsg, _ := fh.bot.Send(c.Chat(), msgs.Events.PrivateOnly)
 		if fh.adminHandler != nil {
 			fh.adminHandler.DeleteAfter(warnMsg, 5*time.Second)
 		}
@@ -157,31 +165,31 @@ func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
 	if exists && now.Sub(last) < 30*time.Second {
 		remaining := 30*time.Second - now.Sub(last)
 		fh.eventRateLimitMu.Unlock()
-		_, _ = fh.bot.Send(c.Chat(), fmt.Sprintf("⏱️ Команда /events доступна раз в 30 секунд. Повтори через %d сек.", int(remaining.Seconds())))
+		_, _ = fh.bot.Send(c.Chat(), fmt.Sprintf(msgs.Events.RateLimit, int(remaining.Seconds())))
 		return nil
 	}
 	fh.eventRateLimit[c.Sender().ID] = now
 	fh.eventRateLimitMu.Unlock()
-	statusMsg, _ := fh.bot.Send(c.Chat(), "🔄 Загрузка событий...")
+	statusMsg, _ := fh.bot.Send(c.Chat(), msgs.Events.Loading)
 	fh.eventsCacheMu.RLock()
 	cacheValid := time.Since(fh.cacheTime) < 5*time.Minute && len(fh.eventsCache) > 0
 	fh.eventsCacheMu.RUnlock()
 	if !cacheValid {
 		if err := fh.fetchEventsFromWebsite(); err != nil {
-			fh.bot.Edit(statusMsg, "❌ Ошибка при загрузке событий.")
+			fh.bot.Edit(statusMsg, msgs.Events.ErrorLoading)
 			return nil
 		}
 	}
 	fh.eventsCacheMu.RLock()
 	defer fh.eventsCacheMu.RUnlock()
 	if len(fh.eventsCache) == 0 {
-		fh.bot.Edit(statusMsg, "❌ Событий нет.")
+		fh.bot.Edit(statusMsg, msgs.Events.NoEvents)
 		return nil
 	}
 	event := fh.eventsCache[0]
-	eventText := fh.formatEventText(event, 0, len(fh.eventsCache))
-	nextBtn := tb.InlineButton{Unique: "next_event", Text: "Далее ➡️", Data: fmt.Sprintf("nav_%d", 0)}
-	interestedBtn := tb.InlineButton{Unique: "event_interested", Text: "Интересует 🔔", Data: fmt.Sprintf("int_%s", event.GetEventID())}
+	eventText := fh.formatEventText(event, 0, len(fh.eventsCache), c.Sender())
+	nextBtn := tb.InlineButton{Unique: "next_event", Text: msgs.Buttons.Next, Data: fmt.Sprintf("nav_%d", 0)}
+	interestedBtn := tb.InlineButton{Unique: "event_interested", Text: msgs.Buttons.Interested, Data: fmt.Sprintf("int_%s", event.GetEventID())}
 	markup := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{{nextBtn}, {interestedBtn}}}
 	editedMsg, err := fh.bot.Edit(statusMsg, eventText, markup, tb.ModeMarkdown)
 	if err != nil {
@@ -202,6 +210,9 @@ func (fh *FeatureHandler) HandleEvent(c tb.Context) error {
 
 // HandlePrevEvent goes to the previous event
 func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Callback() == nil || c.Sender() == nil || c.Callback().Message == nil {
 		return nil
 	}
@@ -210,7 +221,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 	owner, ok := fh.eventMessageOwners[key]
 	fh.eventMessageOwnersMu.RUnlock()
 	if ok && owner != c.Sender().ID {
-		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Это не твоя кнопка"})
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Buttons.NotYourButton})
 	}
 	data := c.Callback().Data
 	var idx int
@@ -220,7 +231,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 	}
 	prev := idx - 1
 	if prev < 0 {
-		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Это первое событие"})
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Events.FirstEvent})
 	}
 	fh.eventsCacheMu.RLock()
 	defer fh.eventsCacheMu.RUnlock()
@@ -228,15 +239,15 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 		return nil
 	}
 	event := fh.eventsCache[prev]
-	text := fh.formatEventText(event, prev, len(fh.eventsCache))
+	text := fh.formatEventText(event, prev, len(fh.eventsCache), c.Sender())
 	var navButtons []tb.InlineButton
 	if prev > 0 {
-		navButtons = append(navButtons, tb.InlineButton{Unique: "prev_event", Text: "⬅️ Назад", Data: fmt.Sprintf("nav_%d", prev)})
+		navButtons = append(navButtons, tb.InlineButton{Unique: "prev_event", Text: msgs.Buttons.Prev, Data: fmt.Sprintf("nav_%d", prev)})
 	}
 	if prev < len(fh.eventsCache)-1 {
-		navButtons = append(navButtons, tb.InlineButton{Unique: "next_event", Text: "Далее ➡️", Data: fmt.Sprintf("nav_%d", prev)})
+		navButtons = append(navButtons, tb.InlineButton{Unique: "next_event", Text: msgs.Buttons.Next, Data: fmt.Sprintf("nav_%d", prev)})
 	}
-	interested := tb.InlineButton{Unique: "event_interested", Text: "Интересует 🔔", Data: fmt.Sprintf("int_%s", event.GetEventID())}
+	interested := tb.InlineButton{Unique: "event_interested", Text: msgs.Buttons.Interested, Data: fmt.Sprintf("int_%s", event.GetEventID())}
 	markup := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{navButtons, {interested}}}
 	_, err = fh.bot.Edit(c.Callback().Message, text, markup, tb.ModeMarkdown)
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
@@ -244,6 +255,9 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 
 // HandleNextEvent goes to the next event
 func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Callback() == nil || c.Sender() == nil || c.Callback().Message == nil {
 		return nil
 	}
@@ -252,7 +266,7 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 	owner, ok := fh.eventMessageOwners[key]
 	fh.eventMessageOwnersMu.RUnlock()
 	if ok && owner != c.Sender().ID {
-		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Это не твоя кнопка"})
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Buttons.NotYourButton})
 	}
 	data := c.Callback().Data
 	var idx int
@@ -264,18 +278,18 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 	fh.eventsCacheMu.RLock()
 	defer fh.eventsCacheMu.RUnlock()
 	if next >= len(fh.eventsCache) {
-		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Это последнее событие"})
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Events.LastEvent})
 	}
 	event := fh.eventsCache[next]
-	text := fh.formatEventText(event, next, len(fh.eventsCache))
+	text := fh.formatEventText(event, next, len(fh.eventsCache), c.Sender())
 	var navButtons []tb.InlineButton
 	if next > 0 {
-		navButtons = append(navButtons, tb.InlineButton{Unique: "prev_event", Text: "⬅️ Назад", Data: fmt.Sprintf("nav_%d", next)})
+		navButtons = append(navButtons, tb.InlineButton{Unique: "prev_event", Text: msgs.Buttons.Prev, Data: fmt.Sprintf("nav_%d", next)})
 	}
 	if next < len(fh.eventsCache)-1 {
-		navButtons = append(navButtons, tb.InlineButton{Unique: "next_event", Text: "Далее ➡️", Data: fmt.Sprintf("nav_%d", next)})
+		navButtons = append(navButtons, tb.InlineButton{Unique: "next_event", Text: msgs.Buttons.Next, Data: fmt.Sprintf("nav_%d", next)})
 	}
-	interested := tb.InlineButton{Unique: "event_interested", Text: "Интересует 🔔", Data: fmt.Sprintf("int_%s", event.GetEventID())}
+	interested := tb.InlineButton{Unique: "event_interested", Text: msgs.Buttons.Interested, Data: fmt.Sprintf("int_%s", event.GetEventID())}
 	markup := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{navButtons, {interested}}}
 	_, err = fh.bot.Edit(c.Callback().Message, text, markup, tb.ModeMarkdown)
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
@@ -283,6 +297,9 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 
 // HandleEventInterested user wants reminders
 func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Callback() == nil || c.Sender() == nil || c.Callback().Message == nil {
 		return nil
 	}
@@ -291,7 +308,7 @@ func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
 	owner, ok := fh.eventMessageOwners[key]
 	fh.eventMessageOwnersMu.RUnlock()
 	if ok && owner != c.Sender().ID {
-		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Это не твоя кнопка"})
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Buttons.NotYourButton})
 	}
 	eventID := strings.TrimPrefix(c.Callback().Data, "int_")
 	uid := c.Sender().ID
@@ -300,7 +317,7 @@ func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
 	already := exists && userInterests[eventID]
 	fh.userEventInterestsMu.RUnlock()
 	if already {
-		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Ты уже подписан на это событие"})
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Events.AlreadySubscribed})
 	}
 	fh.eventsCacheMu.RLock()
 	var current *EventData
@@ -338,9 +355,9 @@ func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
 				timeInfo = fmt.Sprintf("%s %s", current.Day, monthName)
 			}
 		}
-		unsub := tb.InlineButton{Unique: "event_unsubscribe", Text: "Больше не интересно ❌", Data: fmt.Sprintf("unsub_%s", eventID)}
+		unsub := tb.InlineButton{Unique: "event_unsubscribe", Text: msgs.Buttons.Unsubscribe, Data: fmt.Sprintf("unsub_%s", eventID)}
 		markup := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{{unsub}}}
-		confirm := fmt.Sprintf("✅ Ты успешно подписался на событие.\n\nСобытие: %s\nВремя: %s\n\nЯ пришлю тебе напоминания за сутки и за 2 часа до начала.", current.Title, timeInfo)
+		confirm := fmt.Sprintf(msgs.Events.Subscribed, current.Title, timeInfo)
 		_, _ = fh.bot.Send(c.Chat(), confirm, markup)
 	}
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
@@ -348,6 +365,9 @@ func (fh *FeatureHandler) HandleEventInterested(c tb.Context) error {
 
 // HandleEventUnsubscribe removes subscription
 func (fh *FeatureHandler) HandleEventUnsubscribe(c tb.Context) error {
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Callback() == nil || c.Sender() == nil {
 		return nil
 	}
@@ -358,7 +378,7 @@ func (fh *FeatureHandler) HandleEventUnsubscribe(c tb.Context) error {
 	subscribed := exists && userInterests[eventID]
 	fh.userEventInterestsMu.RUnlock()
 	if !subscribed {
-		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Ты не подписан на это событие"})
+		return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Events.NotSubscribed})
 	}
 	fh.eventInterestsMu.Lock()
 	if users, ok := fh.eventInterests[eventID]; ok {
@@ -376,14 +396,17 @@ func (fh *FeatureHandler) HandleEventUnsubscribe(c tb.Context) error {
 		delete(m, eventID)
 	}
 	fh.userEventInterestsMu.Unlock()
-	fh.bot.Edit(c.Callback().Message, "❌ Ты отписался от уведомлений об этом событии.")
+	fh.bot.Edit(c.Callback().Message, msgs.Events.Unsubscribed)
 	logrus.WithFields(logrus.Fields{"user_id": uid, "event_id": eventID}).Info("User unsubscribed")
-	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Ты отписался от уведомлений"})
+	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Events.UnsubscribedCallback})
 }
 
 // HandleBroadcastInterested informs user in group broadcast
 func (fh *FeatureHandler) HandleBroadcastInterested(c tb.Context) error {
-	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: "Используй /events в личных сообщениях с ботом для подписки на события", ShowAlert: true})
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
+	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{Text: msgs.Events.UsePrivate, ShowAlert: true})
 }
 
 // StartEventBroadcaster launches ticker
@@ -459,6 +482,9 @@ func (fh *FeatureHandler) logUpcomingEvents() {
 
 // checkAndBroadcastEvents sends broadcasts 5 days before
 func (fh *FeatureHandler) checkAndBroadcastEvents() {
+	lang := i18n.Get().GetDefault()
+	msgs := i18n.Get().T(lang)
+
 	if err := fh.fetchEventsFromWebsite(); err != nil {
 		logrus.WithError(err).Error("broadcast fetch failed")
 		return
@@ -492,11 +518,11 @@ func (fh *FeatureHandler) checkAndBroadcastEvents() {
 			fh.registeredGroupsMu.RUnlock()
 			for _, cid := range groups {
 				chat := &tb.Chat{ID: cid}
-				text := fmt.Sprintf("🔔 Напоминание о событии через 5 дней!\n\n📅 %s\n🕒 %s %s", event.Title, event.Day, event.Month)
+				text := fmt.Sprintf(msgs.Events.BroadcastReminder, event.Title, event.Day, event.Month)
 				if event.Time != "" {
-					text += fmt.Sprintf(" в %s", event.Time)
+					text = fmt.Sprintf(msgs.Events.BroadcastReminder, event.Title, event.Day, event.Month) + fmt.Sprintf(" в %s", event.Time)
 				}
-				text += "\n\nПодробности: /events в личных сообщениях с ботом"
+				text += msgs.Events.BroadcastDetails
 				if _, err := fh.bot.Send(chat, text); err != nil {
 					logrus.WithError(err).WithFields(logrus.Fields{"chat_id": cid, "event_id": id}).Error("broadcast failed")
 				} else {

@@ -31,6 +31,7 @@ func NewState() UserState {
 	return s
 }
 
+// InitUser initializes user correct count
 func (s *State) InitUser(id int)   { s.mu.Lock(); s.UserCorrect[id] = 0; s.mu.Unlock(); s.save() }
 func (s *State) IncCorrect(id int) { s.mu.Lock(); s.UserCorrect[id]++; s.mu.Unlock(); s.save() }
 func (s *State) TotalCorrect(id int) int {
@@ -39,11 +40,14 @@ func (s *State) TotalCorrect(id int) int {
 	s.mu.RUnlock()
 	return v
 }
+
+// Reset resets user correct count
 func (s *State) Reset(id int)         { s.mu.Lock(); delete(s.UserCorrect, id); s.mu.Unlock(); s.save() }
 func (s *State) SetNewbie(id int)     { s.mu.Lock(); s.NewbieMap[id] = true; s.mu.Unlock(); s.save() }
 func (s *State) ClearNewbie(id int)   { s.mu.Lock(); delete(s.NewbieMap, id); s.mu.Unlock(); s.save() }
 func (s *State) IsNewbie(id int) bool { s.mu.RLock(); v := s.NewbieMap[id]; s.mu.RUnlock(); return v }
 
+// save saves state to file
 func (s *State) save() {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -55,6 +59,7 @@ func (s *State) save() {
 	logrus.WithField("path", abs).Debug("state saved")
 }
 
+// load loads state from the file
 func (s *State) load() {
 	data, err := os.ReadFile(s.File)
 	if err != nil {

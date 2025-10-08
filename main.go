@@ -7,6 +7,7 @@ import (
 
 	"UEPB/internal/bot"
 	"UEPB/internal/core"
+	"UEPB/internal/i18n"
 
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
@@ -29,6 +30,27 @@ type Handler struct {
 func main() {
 	logrus.Info("Bot is starting...")
 	_ = godotenv.Load()
+
+	// Initialize localization
+	defaultLang := i18n.PL
+	langEnv := os.Getenv("DEFAULT_LANG")
+	switch langEnv {
+	case "pl":
+		defaultLang = i18n.PL
+	case "en":
+		defaultLang = i18n.EN
+	case "ru":
+		defaultLang = i18n.RU
+	case "uk":
+		defaultLang = i18n.UK
+	case "be":
+		defaultLang = i18n.BE
+	}
+
+	if err := i18n.Init(defaultLang); err != nil {
+		logrus.WithError(err).Fatal("Failed to initialize i18n")
+	}
+
 	token := os.Getenv("BOT_TOKEN")
 	if token == "" {
 		logrus.Fatal("BOT_TOKEN missing")
@@ -117,13 +139,39 @@ func (h *Handler) handleTextMessage(c tb.Context) error {
 
 // setBotCommands sets bot commands
 func (h *Handler) setBotCommands() {
-	commands := []tb.Command{
-		{Text: "events", Description: "Узнать о событиях университета"},
-		{Text: "ping", Description: "Проверить отклик бота"},
-		{Text: "banword", Description: "Добавить запрещённое слово"},
-		{Text: "unbanword", Description: "Удалить запрещённое слово"},
-		{Text: "listbanword", Description: "Показать список запрещённых слов"},
-		{Text: "spamban", Description: "Забанить пользователя за спам"},
+	languageMapping := map[string]i18n.Lang{
+		"pl": i18n.PL,
+		"en": i18n.EN,
+		"ru": i18n.RU,
+		"uk": i18n.UK,
+		"be": i18n.BE,
+		"de": i18n.EN,
 	}
-	_ = h.bot.SetCommands(commands)
+
+	// Set commands for each supported language code
+	for langCode, lang := range languageMapping {
+		msgs := i18n.Get().T(lang)
+		commands := []tb.Command{
+			{Text: "events", Description: msgs.Commands.EventsDesc},
+			{Text: "ping", Description: msgs.Commands.PingDesc},
+			{Text: "banword", Description: msgs.Commands.BanwordDesc},
+			{Text: "unbanword", Description: msgs.Commands.UnbanwordDesc},
+			{Text: "listbanword", Description: msgs.Commands.ListbanwordDesc},
+			{Text: "spamban", Description: msgs.Commands.SpambanDesc},
+		}
+
+		_ = h.bot.SetCommands(commands, langCode)
+	}
+
+	// Set default commands
+	msgsPL := i18n.Get().T(i18n.PL)
+	commandsDefault := []tb.Command{
+		{Text: "events", Description: msgsPL.Commands.EventsDesc},
+		{Text: "ping", Description: msgsPL.Commands.PingDesc},
+		{Text: "banword", Description: msgsPL.Commands.BanwordDesc},
+		{Text: "unbanword", Description: msgsPL.Commands.UnbanwordDesc},
+		{Text: "listbanword", Description: msgsPL.Commands.ListbanwordDesc},
+		{Text: "spamban", Description: msgsPL.Commands.SpambanDesc},
+	}
+	_ = h.bot.SetCommands(commandsDefault)
 }

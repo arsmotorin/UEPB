@@ -1,0 +1,85 @@
+[welcome]
+greeting = "👋 Cześć!"
+greeting_with_username = "👋 Cześć, @%s!"
+choose_option = "Wybierz, co Cię interesuje, używając poniższych przycisków."
+
+[buttons]
+student = "👨‍🎓 Jestem studentem, mogę potwierdzić"
+guest = "🧐 Mam pytanie"
+ads = "📢 Chcę umieścić reklamę"
+next = "Dalej ➡️"
+prev = "⬅️ Wstecz"
+interested = "Interesuje mnie 🔔"
+unsubscribe = "Już nie interesuje ❌"
+not_your_button = "To nie Twój przycisk"
+
+[quiz]
+verification_passed = "✅ Weryfikacja zakończona! Teraz możesz pisać na czacie."
+verification_failed = "❌ Nie udało się potwierdzić statusu studenta."
+question_1 = "1️⃣ Jakiego systemu używa uniwersytet do zarządzania nauką?"
+question_2 = "2️⃣ Jakiej poczty używa uczelnia dla kont studenckich?"
+question_3 = "3️⃣ Na jakiej ulicy znajduje się główny budynek uniwersytetu?"
+
+[guest]
+can_write = "✅ Teraz możesz pisać na czacie. Zadaj swoje pytanie."
+
+[ads]
+message = "📢 Jesteśmy otwarci na reklamę.\n\nNapisz do @chathlp i opisz, co chcesz zaproponować."
+
+[ping]
+pong = "🏓 Pong!"
+pong_with_ms = "🏓 Pong! (%d ms)"
+private_only = "ℹ️ Komenda /ping jest dostępna tylko w prywatnych wiadomościach z botem."
+
+[ratelimit]
+too_fast = "⏱️ Proszę, nie częściej niż jedna komenda na sekundę."
+
+[events]
+loading = "🔄 Ładowanie wydarzeń..."
+error_loading = "❌ Błąd podczas ładowania wydarzeń."
+no_events = "❌ Brak wydarzeń."
+private_only = "ℹ️ Komenda /events jest dostępna tylko w prywatnych wiadomościach z botem."
+rate_limit = "⏱️ Komenda /events jest dostępna raz na 30 sekund. Spróbuj ponownie za %d sek."
+first_event = "To pierwsze wydarzenie"
+last_event = "To ostatnie wydarzenie"
+event_number = "Wydarzenie %d z %d"
+will_happen = "🕒 Wydarzenie odbędzie się %s %s %s"
+will_happen_no_time = "🕒 Wydarzenie odbędzie się %s %s"
+subscribed = "✅ Pomyślnie zapisałeś się na wydarzenie.\n\nWydarzenie: %s\nCzas: %s\n\nPrzypomnę Ci na dobę i 2 godziny przed rozpoczęciem."
+already_subscribed = "Już jesteś zapisany na to wydarzenie"
+not_subscribed = "Nie jesteś zapisany na to wydarzenie"
+unsubscribed = "❌ Wypisałeś się z powiadomień o tym wydarzeniu."
+unsubscribed_callback = "Wypisałeś się z powiadomień"
+use_private = "Użyj /events w prywatnych wiadomościach z botem, aby zapisać się na wydarzenia"
+broadcast_reminder = "🔔 Przypomnienie o wydarzeniu za 5 dni!\n\n📅 %s\n🕒 %s %s"
+broadcast_details = "\n\nSzczegóły: /events w prywatnych wiadomościach z botem"
+
+[filter]
+warning = "⚠️ %s, wiadomość została usunięta. Przy ponownym naruszeniu zostanie ban."
+
+[admin]
+ban_command_admin_only = "ℹ Komenda /banword jest dostępna tylko dla administracji."
+ban_usage = "ℹ Użyj: /banword słowo1 [słowo2 ...]"
+ban_added = "✅ Dodano zakazane wyrażenie: %s"
+unban_command_admin_only = "ℹ Komenda /unbanword jest dostępna tylko dla administracji."
+unban_usage = "💡 Użyj: /unbanword słowo1 [słowo2 ...]"
+unban_not_found = "❌ Takiego wyrażenia nie ma na liście."
+unban_removed = "✅ Usunięto zakazane wyrażenie: %s"
+list_command_admin_only = "ℹ Komenda /listbanword jest dostępna tylko dla administracji."
+list_empty = "📭 Lista jest pusta."
+list_header = "🚫 Zakazane wyrażenia:\n\n"
+spamban_command_admin_only = "ℹ Komenda /spamban jest dostępna tylko dla administracji."
+spamban_user_not_found = "❌ Nie udało się określić użytkownika do zbanowania."
+spamban_cannot_ban_admin = "⛔ Nie można zbanować administratora."
+spamban_success = "🔨 Użytkownik %s został zbanowany za spam."
+
+[start]
+greeting = "👋 Cześć! Jestem botem grupy studenckiej UEP.\n\nZacznij wpisywać komendy z / a pokażę Ci, co mogę robić"
+
+[commands]
+events_desc = "Dowiedz się o wydarzeniach uniwersytetu"
+ping_desc = "Sprawdź odpowiedź bota"
+banword_desc = "Dodaj zakazane słowo"
+unbanword_desc = "Usuń zakazane słowo"
+listbanword_desc = "Pokaż listę zakazanych słów"
+spamban_desc = "Zbanuj użytkownika za spam"

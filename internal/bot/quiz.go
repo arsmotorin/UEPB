@@ -2,6 +2,7 @@ package bot
 
 import (
 	"UEPB/internal/core"
+	"UEPB/internal/i18n"
 	"fmt"
 	"time"
 
@@ -15,17 +16,23 @@ func CreateInlineButton(unique, text string) tb.InlineButton {
 
 // StudentButton returns student button
 func StudentButton() tb.InlineButton {
-	return CreateInlineButton("student", "👨‍🎓 Я студент, могу подтвердить")
+	lang := i18n.Get().GetDefault()
+	msgs := i18n.Get().T(lang)
+	return CreateInlineButton("student", msgs.Buttons.Student)
 }
 
 // GuestButton returns guest button
 func GuestButton() tb.InlineButton {
-	return CreateInlineButton("guest", "🧐 У меня есть вопрос")
+	lang := i18n.Get().GetDefault()
+	msgs := i18n.Get().T(lang)
+	return CreateInlineButton("guest", msgs.Buttons.Guest)
 }
 
 // AdsButton returns ads button
 func AdsButton() tb.InlineButton {
-	return CreateInlineButton("ads", "📢 Хочу разместить рекламу")
+	lang := i18n.Get().GetDefault()
+	msgs := i18n.Get().T(lang)
+	return CreateInlineButton("ads", msgs.Buttons.Ads)
 }
 
 // HandleStudent starts quiz
@@ -52,6 +59,9 @@ func (fh *FeatureHandler) RegisterQuizHandlers(bot *tb.Bot) {
 // CreateQuizHandler builds handler for quiz button
 func (fh *FeatureHandler) CreateQuizHandler(i int, q core.QuestionInterface, btn tb.InlineButton) func(tb.Context) error {
 	return func(c tb.Context) error {
+		lang := fh.getLangForUser(c.Sender())
+		msgs := i18n.Get().T(lang)
+
 		userID := int(c.Sender().ID)
 		if btn.Unique == q.GetAnswer() {
 			fh.state.IncCorrect(userID)
@@ -67,14 +77,14 @@ func (fh *FeatureHandler) CreateQuizHandler(i int, q core.QuestionInterface, btn
 		if totalCorrect >= 2 {
 			fh.SetUserRestriction(c.Chat(), c.Sender(), true)
 			fh.state.ClearNewbie(userID)
-			msg := fh.SendOrEdit(c.Chat(), c.Message(), "✅ Верификация пройдена! Теперь можно писать в чат.", nil)
+			msg := fh.SendOrEdit(c.Chat(), c.Message(), msgs.Quiz.VerificationPassed, nil)
 			if fh.adminHandler != nil {
 				fh.adminHandler.DeleteAfter(msg, 5*time.Second)
 			}
 			logMsg := fmt.Sprintf("✅ Пользователь успешно прошёл верификацию.\n\nПользователь: %s\nПравильных ответов: %d/%d", fh.adminHandler.GetUserDisplayName(c.Sender()), totalCorrect, totalQuestions)
 			fh.adminHandler.LogToAdmin(logMsg)
 		} else {
-			msg := fh.SendOrEdit(c.Chat(), c.Message(), "❌ Не удалось подтвердить статус студента.", nil)
+			msg := fh.SendOrEdit(c.Chat(), c.Message(), msgs.Quiz.VerificationFailed, nil)
 			if fh.adminHandler != nil {
 				fh.adminHandler.DeleteAfter(msg, 5*time.Second)
 			}
@@ -110,10 +120,13 @@ func (quiz Quiz) GetQuestions() []core.QuestionInterface {
 
 // DefaultQuiz returns default quiz
 func DefaultQuiz() core.QuizInterface {
+	lang := i18n.Get().GetDefault()
+	msgs := i18n.Get().T(lang)
+
 	return Quiz{Questions: []Question{
-		{"1️⃣ Какую систему использует университет для управления обучением?", []tb.InlineButton{{Unique: "q1_usos", Text: "USOS"}, {Unique: "q1_edupl", Text: "EDUPL"}, {Unique: "q1_muci", Text: "MUCI"}}, "q1_usos"},
-		{"2️⃣ Какую почту использует ВУЗ для учётных записей студентов?", []tb.InlineButton{{Unique: "q2_gmail", Text: "Gmail"}, {Unique: "q2_outlook", Text: "Outlook"}, {Unique: "q2_yahoo", Text: "Yahoo"}}, "q2_outlook"},
-		{"3️⃣ На какой улице находится главный корпус университета?", []tb.InlineButton{{Unique: "q3_niepodleglosci", Text: "Ul. Niepodległości"}, {Unique: "q3_chinska", Text: "Ul. Chińska"}, {Unique: "q3_roz", Text: "Ul. Róż"}}, "q3_niepodleglosci"},
+		{msgs.Quiz.Question1, []tb.InlineButton{{Unique: "q1_usos", Text: "USOS"}, {Unique: "q1_edupl", Text: "EDUPL"}, {Unique: "q1_muci", Text: "MUCI"}}, "q1_usos"},
+		{msgs.Quiz.Question2, []tb.InlineButton{{Unique: "q2_gmail", Text: "Gmail"}, {Unique: "q2_outlook", Text: "Outlook"}, {Unique: "q2_yahoo", Text: "Yahoo"}}, "q2_outlook"},
+		{msgs.Quiz.Question3, []tb.InlineButton{{Unique: "q3_niepodleglosci", Text: "Ul. Niepodległości"}, {Unique: "q3_chinska", Text: "Ul. Chińska"}, {Unique: "q3_roz", Text: "Ul. Róż"}}, "q3_niepodleglosci"},
 	}}
 }
 

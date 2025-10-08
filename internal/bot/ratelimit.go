@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"UEPB/internal/i18n"
 	"time"
 
 	tb "gopkg.in/telebot.v4"
@@ -12,6 +13,9 @@ func (fh *FeatureHandler) RateLimit(handler func(tb.Context) error) func(tb.Cont
 		if c.Sender() == nil {
 			return handler(c)
 		}
+		lang := fh.getLangForUser(c.Sender())
+		msgs := i18n.Get().T(lang)
+
 		uid := c.Sender().ID
 		fh.rlMu.Lock()
 		last := fh.rateLimit[uid]
@@ -20,7 +24,7 @@ func (fh *FeatureHandler) RateLimit(handler func(tb.Context) error) func(tb.Cont
 			fh.rateLimit[uid] = now
 			fh.rlMu.Unlock()
 			if c.Chat() != nil {
-				warn, _ := fh.bot.Send(c.Chat(), "⏱️ Пожалуйста, не чаще одной команды в секунду.")
+				warn, _ := fh.bot.Send(c.Chat(), msgs.RateLimit.TooFast)
 				if fh.adminHandler != nil {
 					fh.adminHandler.DeleteAfter(warn, 5*time.Second)
 				}

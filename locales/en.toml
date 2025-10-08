@@ -1,0 +1,85 @@
+[welcome]
+greeting = "👋 Hello!"
+greeting_with_username = "👋 Hello, @%s!"
+choose_option = "Choose what do you want using the buttons below."
+
+[buttons]
+student = "👨‍🎓 I'm a student, I can verify"
+guest = "🧐 I have a question"
+ads = "📢 I want to place an ad"
+next = "Next ➡️"
+prev = "⬅️ Back"
+interested = "Interested 🔔"
+unsubscribe = "Not interested anymore ❌"
+not_your_button = "This is not your button"
+
+[quiz]
+verification_passed = "✅ Verification passed! Now you can write in the chat."
+verification_failed = "❌ Failed to verify student status."
+question_1 = "1️⃣ What system does the university use for learning management?"
+question_2 = "2️⃣ What email does the university use for student accounts?"
+question_3 = "3️⃣ On which street is the main building of the university located?"
+
+[guest]
+can_write = "✅ Now you can write in the chat. Ask your question."
+
+[ads]
+message = "📢 We are open to advertising.\n\nWrite to @chathlp and describe what you want to offer."
+
+[ping]
+pong = "🏓 Pong!"
+pong_with_ms = "🏓 Pong! (%d ms)"
+private_only = "ℹ️ The /ping command is only available in private messages with the bot."
+
+[ratelimit]
+too_fast = "⏱️ Please, no more than one command per second."
+
+[events]
+loading = "🔄 Loading events..."
+error_loading = "❌ Error loading events."
+no_events = "❌ No events."
+private_only = "ℹ️ The /events command is only available in private messages with the bot."
+rate_limit = "⏱️ The /events command is available once every 30 seconds. Try again in %d sec."
+first_event = "This is the first event"
+last_event = "This is the last event"
+event_number = "Event %d of %d"
+will_happen = "🕒 The event will take place on %s %s at %s"
+will_happen_no_time = "🕒 The event will take place on %s %s"
+subscribed = "✅ You have successfully subscribed to the event.\n\nEvent: %s\nTime: %s\n\nI will send you reminders 24 hours and 2 hours before the start."
+already_subscribed = "You are already subscribed to this event"
+not_subscribed = "You are not subscribed to this event"
+unsubscribed = "❌ You have unsubscribed from notifications about this event."
+unsubscribed_callback = "You have unsubscribed from notifications"
+use_private = "Use /events in private messages with the bot to subscribe to events"
+broadcast_reminder = "🔔 Event reminder in 5 days!\n\n📅 %s\n🕒 %s %s"
+broadcast_details = "\n\nDetails: /events in private messages with the bot"
+
+[filter]
+warning = "⚠️ %s, message deleted. A repeated violation will result in a ban."
+
+[admin]
+ban_command_admin_only = "ℹ The /banword command is only available to administrators."
+ban_usage = "ℹ Use: /banword word1 [word2 ...]"
+ban_added = "✅ Banned phrase added: %s"
+unban_command_admin_only = "ℹ The /unbanword command is only available to administrators."
+unban_usage = "💡 Use: /unbanword word1 [word2 ...]"
+unban_not_found = "❌ This phrase is not on the list."
+unban_removed = "✅ Banned phrase removed: %s"
+list_command_admin_only = "ℹ The /listbanword command is only available to administrators."
+list_empty = "📭 The list is empty."
+list_header = "🚫 Banned phrases:\n\n"
+spamban_command_admin_only = "ℹ The /spamban command is only available to administrators."
+spamban_user_not_found = "❌ Failed to identify user for ban."
+spamban_cannot_ban_admin = "⛔ Cannot ban an administrator."
+spamban_success = "🔨 User %s has been banned for spam."
+
+[start]
+greeting = "👋 Hello! I'm the UEP student group bot.\n\nStart typing commands with / and I'll show you what I can do"
+
+[commands]
+events_desc = "Learn about university events"
+ping_desc = "Check bot response"
+banword_desc = "Add a banned word"
+unbanword_desc = "Remove a banned word"
+listbanword_desc = "Show list of banned words"
+spamban_desc = "Ban a user for spam"

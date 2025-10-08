@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"UEPB/internal/i18n"
 	"fmt"
 	"strings"
 	"time"
@@ -39,6 +40,9 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 	}).Debug("Filtering message")
 
 	if fh.blacklist != nil && fh.blacklist.CheckMessage(msg.Text) {
+		lang := fh.getLangForUser(msg.Sender)
+		msgs := i18n.Get().T(lang)
+
 		// Record violation
 		if fh.adminHandler != nil {
 			fh.adminHandler.AddViolation(msg.Sender.ID)
@@ -82,12 +86,11 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 		}
 
 		// First violation -> ephemeral warning
-		warningText := fmt.Sprintf("⚠️ %s, сообщение удалено. При повторном нарушении будет бан.", func() string {
-			if fh.adminHandler != nil {
-				return fh.adminHandler.GetUserDisplayName(msg.Sender)
-			}
-			return msg.Sender.Username
-		}())
+		displayName := msg.Sender.Username
+		if fh.adminHandler != nil {
+			displayName = fh.adminHandler.GetUserDisplayName(msg.Sender)
+		}
+		warningText := fmt.Sprintf(msgs.Filter.Warning, displayName)
 		warnMsg, _ := fh.bot.Send(c.Chat(), warningText)
 		if fh.adminHandler != nil {
 			fh.adminHandler.DeleteAfter(warnMsg, 5*time.Second)

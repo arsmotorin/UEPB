@@ -16,7 +16,7 @@ type BlacklistInterface = core.BlacklistInterface
 
 type AdminHandlerInterface = core.AdminHandlerInterface
 
-// FeatureHandlerInterface lists feature methods.
+// FeatureHandlerInterface lists feature methods
 type FeatureHandlerInterface interface {
 	OnlyNewbies(handler func(tb.Context) error) func(tb.Context) error
 	SendOrEdit(chat *tb.Chat, msg *tb.Message, text string, rm *tb.ReplyMarkup) *tb.Message

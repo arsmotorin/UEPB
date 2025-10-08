@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"UEPB/internal/core"
+	"UEPB/internal/i18n"
 
 	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
@@ -17,14 +18,16 @@ import (
 
 // AdminHandler manages admin actions, logs and violations
 type AdminHandler struct {
-	bot            *tb.Bot
-	blacklist      core.BlacklistInterface
-	adminChatID    int64
-	violations     map[int64]int
-	violationsMu   sync.RWMutex
-	violationsFile string
-	groupIDs       map[int64]struct{}
-	groupMu        sync.RWMutex
+	bot             *tb.Bot
+	blacklist       core.BlacklistInterface
+	adminChatID     int64
+	violations      map[int64]int
+	violationsMu    sync.RWMutex
+	violationsFile  string
+	groupIDs        map[int64]struct{}
+	groupMu         sync.RWMutex
+	userLanguages   map[int64]i18n.Lang
+	userLanguagesMu sync.RWMutex
 }
 
 // NewAdminHandler creates a new admin handler with persisted violations
@@ -37,6 +40,7 @@ func NewAdminHandler(bot *tb.Bot, blacklist core.BlacklistInterface, adminChatID
 		violations:     violations,
 		violationsFile: "data/violations.json",
 		groupIDs:       make(map[int64]struct{}),
+		userLanguages:  make(map[int64]i18n.Lang),
 	}
 	ah.loadViolations()
 	return ah
@@ -71,6 +75,11 @@ func (ah *AdminHandler) GetUserDisplayName(user *tb.User) string {
 	return fmt.Sprintf("%s (ID: %d)", name, user.ID)
 }
 
+// getLangForUser returns language for a specific user
+func (ah *AdminHandler) getLangForUser(user *tb.User) i18n.Lang {
+	return getLangForUser(user, ah.userLanguages, &ah.userLanguagesMu)
+}
+
 // DeleteAfter deletes message after delay
 func (ah *AdminHandler) DeleteAfter(m *tb.Message, d time.Duration) {
 	if m == nil {
@@ -89,19 +98,22 @@ func (ah *AdminHandler) BanUser(chat *tb.Chat, user *tb.User) error {
 
 // HandleBan adds a phrase to the blocklist
 func (ah *AdminHandler) HandleBan(c tb.Context) error {
+	lang := ah.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Message() == nil || c.Sender() == nil || !ah.IsAdmin(c.Chat(), c.Sender()) {
-		msg, _ := ah.bot.Send(c.Chat(), "ℹ Команда /banword доступна только администрации.")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.BanCommandAdminOnly)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	args := strings.Fields(c.Message().Text)
 	if len(args) < 2 {
-		msg, _ := ah.bot.Send(c.Chat(), "ℹ Используй: /banword слово1 [слово2 ...]")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.BanUsage)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	ah.blacklist.AddPhrase(args[1:])
-	msg, _ := ah.bot.Send(c.Chat(), "✅ Добавлено запрещённое словосочетание: "+strings.Join(args[1:], " "))
+	msg, _ := ah.bot.Send(c.Chat(), fmt.Sprintf(msgs.Admin.BanAdded, strings.Join(args[1:], " ")))
 	ah.DeleteAfter(msg, 10*time.Second)
 	ah.LogToAdmin(fmt.Sprintf("🚫 Добавлено запрещённое слово\n\nАдмин: %s\nЗапрещённые слова: `%s`", ah.GetUserDisplayName(c.Sender()), strings.Join(args[1:], " ")))
 	return nil
@@ -109,21 +121,24 @@ func (ah *AdminHandler) HandleBan(c tb.Context) error {
 
 // HandleUnban removes a phrase
 func (ah *AdminHandler) HandleUnban(c tb.Context) error {
+	lang := ah.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Message() == nil || c.Sender() == nil || !ah.IsAdmin(c.Chat(), c.Sender()) {
-		msg, _ := ah.bot.Send(c.Chat(), "ℹ Команда /unbanword доступна только администрации.")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.UnbanCommandAdminOnly)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	args := strings.Fields(c.Message().Text)
 	if len(args) < 2 {
-		msg, _ := ah.bot.Send(c.Chat(), "💡 Используй: /unbanword слово1 [слово2 ...]")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.UnbanUsage)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	ok := ah.blacklist.RemovePhrase(args[1:])
-	text := "❌ Такого словосочетания нет в списке."
+	text := msgs.Admin.UnbanNotFound
 	if ok {
-		text = "✅ Удалено запрещённое словосочетание: " + strings.Join(args[1:], " ")
+		text = fmt.Sprintf(msgs.Admin.UnbanRemoved, strings.Join(args[1:], " "))
 		ah.LogToAdmin(fmt.Sprintf("✅ Удалено запрещённое слово\n\nАдмин: %s\nУдалённые слова: `%s`", ah.GetUserDisplayName(c.Sender()), strings.Join(args[1:], " ")))
 	}
 	msg, _ := ah.bot.Send(c.Chat(), text)
@@ -133,18 +148,21 @@ func (ah *AdminHandler) HandleUnban(c tb.Context) error {
 
 // HandleListBan shows the banned list
 func (ah *AdminHandler) HandleListBan(c tb.Context) error {
+	lang := ah.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Message() == nil || c.Sender() == nil || !ah.IsAdmin(c.Chat(), c.Sender()) {
-		msg, _ := ah.bot.Send(c.Chat(), "ℹ Команда /listbanword доступна только администрации.")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.ListCommandAdminOnly)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	phrases := ah.blacklist.List()
 	if len(phrases) == 0 {
-		_, _ = ah.bot.Send(c.Chat(), "📭 Список пуст.")
+		_, _ = ah.bot.Send(c.Chat(), msgs.Admin.ListEmpty)
 		return nil
 	}
 	var sb strings.Builder
-	sb.WriteString("🚫 Запрещённые словосочетания:\n\n")
+	sb.WriteString(msgs.Admin.ListHeader)
 	for i, p := range phrases {
 		sb.WriteString(fmt.Sprintf("%d. `%s`\n", i+1, strings.Join(p, " ")))
 	}
@@ -192,25 +210,28 @@ func (ah *AdminHandler) BanUserEverywhere(user *tb.User) {
 
 // HandleSpamBan performs the spam ban command.
 func (ah *AdminHandler) HandleSpamBan(c tb.Context) error {
+	lang := ah.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Message() == nil || c.Sender() == nil || !ah.IsAdmin(c.Chat(), c.Sender()) {
-		msg, _ := ah.bot.Send(c.Chat(), "ℹ Команда /spamban доступна только администрации.")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.SpambanCommandAdminOnly)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	target := ah.resolveTargetUser(c)
 	if target == nil {
-		msg, _ := ah.bot.Send(c.Chat(), "❌ Не удалось определить пользователя для бана.")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.SpambanUserNotFound)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	if ah.IsAdmin(c.Chat(), target) {
-		msg, _ := ah.bot.Send(c.Chat(), "⛔ Нельзя забанить администратора.")
+		msg, _ := ah.bot.Send(c.Chat(), msgs.Admin.SpambanCannotBanAdmin)
 		ah.DeleteAfter(msg, 10*time.Second)
 		return nil
 	}
 	ah.BanUserEverywhere(target)
 	ah.ClearViolations(target.ID)
-	_, _ = ah.bot.Send(c.Chat(), fmt.Sprintf("🔨 Пользователь %s забанен за спам.", ah.GetUserDisplayName(target)))
+	_, _ = ah.bot.Send(c.Chat(), fmt.Sprintf(msgs.Admin.SpambanSuccess, ah.GetUserDisplayName(target)))
 	ah.LogToAdmin(fmt.Sprintf("🔨 Пользователь забанен за спам.\n\nЗабанен: %s\nАдмин: %s", ah.GetUserDisplayName(target), ah.GetUserDisplayName(c.Sender())))
 	return nil
 }

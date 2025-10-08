@@ -2,6 +2,7 @@ package bot
 
 import (
 	"UEPB/internal/core"
+	"UEPB/internal/i18n"
 	"fmt"
 	"strings"
 	"sync"
@@ -42,19 +43,87 @@ type FeatureHandler struct {
 	registeredGroupsMu   sync.RWMutex
 	broadcastedEvents    map[string]bool
 	broadcastedEventsMu  sync.Mutex
+	userLanguages        map[int64]i18n.Lang
+	userLanguagesMu      sync.RWMutex
 }
 
 // NewFeatureHandler constructs feature handler
 func NewFeatureHandler(bot *tb.Bot, state core.UserState, quiz core.QuizInterface, blacklist core.BlacklistInterface, adminChatID int64, violations map[int64]int, adminHandler core.AdminHandlerInterface, btns struct{ Student, Guest, Ads tb.InlineButton }) *FeatureHandler {
-	return &FeatureHandler{bot: bot, state: state, quiz: quiz, blacklist: blacklist, adminChatID: adminChatID, violations: violations, rateLimit: make(map[int64]time.Time), Btns: btns, adminHandler: adminHandler, eventRateLimit: make(map[int64]time.Time), eventInterests: make(map[string][]int64), userEventInterests: make(map[int64]map[string]bool), pendingActivations: make(map[int64]string), activatedUsers: make(map[int64]bool), eventMessageOwners: make(map[string]int64), registeredGroups: make(map[int64]bool), broadcastedEvents: make(map[string]bool)}
+	return &FeatureHandler{
+		bot:                bot,
+		state:              state,
+		quiz:               quiz,
+		blacklist:          blacklist,
+		adminChatID:        adminChatID,
+		violations:         violations,
+		rateLimit:          make(map[int64]time.Time),
+		Btns:               btns,
+		adminHandler:       adminHandler,
+		eventRateLimit:     make(map[int64]time.Time),
+		eventInterests:     make(map[string][]int64),
+		userEventInterests: make(map[int64]map[string]bool),
+		pendingActivations: make(map[int64]string),
+		activatedUsers:     make(map[int64]bool),
+		eventMessageOwners: make(map[string]int64),
+		registeredGroups:   make(map[int64]bool),
+		broadcastedEvents:  make(map[string]bool),
+		userLanguages:      make(map[int64]i18n.Lang),
+	}
+}
+
+// getLangForUser returns language for a specific user based on their Telegram language
+func getLangForUser(user *tb.User, userLanguages map[int64]i18n.Lang, userLanguagesMu *sync.RWMutex) i18n.Lang {
+	if user == nil {
+		logrus.Warn("getLangForUser: user is nil, returning default")
+		return i18n.Get().GetDefault()
+	}
+
+	langCode := strings.ToLower(strings.TrimSpace(user.LanguageCode))
+
+	// If language code is empty, use default
+	if langCode == "" {
+		return i18n.Get().GetDefault()
+	}
+
+	// Supported languages mapping
+	supportedLanguages := map[string]i18n.Lang{
+		"pl": i18n.PL,
+		"en": i18n.EN,
+		"ru": i18n.RU,
+		"uk": i18n.UK,
+		"be": i18n.BE,
+	}
+
+	// Try exact match first
+	if lang, ok := supportedLanguages[langCode]; ok {
+		return lang
+	}
+
+	// Try prefix match (e.g., "en-US" -> "en")
+	for code, lang := range supportedLanguages {
+		if strings.HasPrefix(langCode, code) {
+			return lang
+		}
+	}
+
+	// Unknown language, use default
+	return i18n.Get().GetDefault()
+}
+
+// getLangForUser returns language for a specific user (FeatureHandler method)
+func (fh *FeatureHandler) getLangForUser(user *tb.User) i18n.Lang {
+	return getLangForUser(user, fh.userLanguages, &fh.userLanguagesMu)
 }
 
 // OnlyNewbies restricts handler to newbies
 func (fh *FeatureHandler) OnlyNewbies(handler func(tb.Context) error) func(tb.Context) error {
 	return func(c tb.Context) error {
+		lang := fh.getLangForUser(c.Sender())
+		msgs := i18n.Get().T(lang)
+
 		if c.Sender() == nil || !fh.state.IsNewbie(int(c.Sender().ID)) {
 			if cb := c.Callback(); cb != nil {
-				_ = fh.bot.Respond(cb, &tb.CallbackResponse{Text: "Это не твоя кнопка"})
+				_ = fh.bot.Respond(cb, &tb.CallbackResponse{Text: msgs.Buttons.NotYourButton})
 			}
 			return nil
 		}
@@ -118,13 +187,20 @@ func (fh *FeatureHandler) HandleUserJoined(c tb.Context) error {
 		reg.RegisterGroup(c.Chat())
 	}
 	users := GetNewUsers(c.Message())
-	kb := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{{fh.Btns.Student}, {fh.Btns.Guest}, {fh.Btns.Ads}}}
 	for _, u := range users {
+		lang := fh.getLangForUser(u)
+		msgs := i18n.Get().T(lang)
+
+		studentBtn := tb.InlineButton{Unique: "student", Text: msgs.Buttons.Student}
+		guestBtn := tb.InlineButton{Unique: "guest", Text: msgs.Buttons.Guest}
+		adsBtn := tb.InlineButton{Unique: "ads", Text: msgs.Buttons.Ads}
+		kb := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{{studentBtn}, {guestBtn}, {adsBtn}}}
+
 		fh.state.SetNewbie(int(u.ID))
 		fh.SetUserRestriction(c.Chat(), u, false)
-		txt := "👋 Привет!\n\nВыбери, что тебя интересует, используя кнопки ниже."
+		txt := msgs.Welcome.Greeting + "\n\n" + msgs.Welcome.ChooseOption
 		if u.Username != "" {
-			txt = fmt.Sprintf("👋 Привет, @%s!\n\nВыбери, что тебя интересует, используя кнопки ниже.", u.Username)
+			txt = fmt.Sprintf(msgs.Welcome.GreetingWithUsername, u.Username) + "\n\n" + msgs.Welcome.ChooseOption
 		}
 		msg := fh.SendOrEdit(c.Chat(), nil, txt, kb)
 		fh.adminHandler.DeleteAfter(msg, 5*time.Minute)
@@ -150,9 +226,12 @@ func (fh *FeatureHandler) HandleUserLeft(c tb.Context) error {
 
 // HandleGuest lifts restriction for guest.
 func (fh *FeatureHandler) HandleGuest(c tb.Context) error {
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	fh.SetUserRestriction(c.Chat(), c.Sender(), true)
 	fh.state.ClearNewbie(int(c.Sender().ID))
-	msg := fh.SendOrEdit(c.Chat(), c.Message(), "✅ Теперь можно писать в чат. Задай свой вопрос.", nil)
+	msg := fh.SendOrEdit(c.Chat(), c.Message(), msgs.Guest.CanWrite, nil)
 	fh.adminHandler.DeleteAfter(msg, 5*time.Second)
 	logMsg := fmt.Sprintf("🧐 Пользователь выбрал, что у него есть вопрос.\n\nПользователь: %s", fh.adminHandler.GetUserDisplayName(c.Sender()))
 	fh.adminHandler.LogToAdmin(logMsg)
@@ -161,7 +240,10 @@ func (fh *FeatureHandler) HandleGuest(c tb.Context) error {
 
 // HandleAds informs about ads
 func (fh *FeatureHandler) HandleAds(c tb.Context) error {
-	msg := fh.SendOrEdit(c.Chat(), c.Message(), "📢 Мы открыты к рекламе.\n\nНапиши @chathlp и опиши, что хочешь предложить.", nil)
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
+	msg := fh.SendOrEdit(c.Chat(), c.Message(), msgs.Ads.Message, nil)
 	fh.adminHandler.DeleteAfter(msg, 10*time.Second)
 	logMsg := fmt.Sprintf("📢 Пользователь выбрал рекламу.\n\nПользователь: %s", fh.adminHandler.GetUserDisplayName(c.Sender()))
 	fh.adminHandler.LogToAdmin(logMsg)
@@ -170,6 +252,9 @@ func (fh *FeatureHandler) HandleAds(c tb.Context) error {
 
 // HandleStart handles /start in private
 func (fh *FeatureHandler) HandleStart(c tb.Context) error {
+	lang := fh.getLangForUser(c.Sender())
+	msgs := i18n.Get().T(lang)
+
 	if c.Chat().Type != tb.ChatPrivate || c.Sender() == nil {
 		return nil
 	}
@@ -196,11 +281,11 @@ func (fh *FeatureHandler) HandleStart(c tb.Context) error {
 		}
 		fh.userEventInterests[uid][eventID] = true
 		fh.userEventInterestsMu.Unlock()
-		err := fh.sendEventSubscriptionConfirmation(c.Chat(), eventID)
+		err := fh.sendEventSubscriptionConfirmation(c.Chat(), c.Sender(), eventID)
 		logrus.WithFields(logrus.Fields{"user_id": uid, "event_id": eventID}).Info("User subscribed via start")
 		return err
 	}
-	_, err := fh.bot.Send(c.Chat(), "👋 Привет! Я – бот студенческой группы UEP.\n\nНачни вводить команды с / и я тебе покажу, что могу делать")
+	_, err := fh.bot.Send(c.Chat(), msgs.Start.Greeting)
 	logrus.WithField("user_id", uid).Info("User started bot")
 	return err
 }
@@ -236,7 +321,7 @@ func (fh *FeatureHandler) HandlePrivateMessage(c tb.Context) error {
 		}
 		fh.userEventInterests[uid][eventID] = true
 		fh.userEventInterestsMu.Unlock()
-		err := fh.sendEventSubscriptionConfirmation(c.Chat(), eventID)
+		err := fh.sendEventSubscriptionConfirmation(c.Chat(), c.Sender(), eventID)
 		logrus.WithFields(logrus.Fields{"user_id": uid, "event_id": eventID}).Info("User subscribed via message")
 		return err
 	}
@@ -251,8 +336,11 @@ func (fh *FeatureHandler) RegisterGroup(chatID int64) {
 	logrus.WithField("chat_id", chatID).Info("Group registered for broadcasts")
 }
 
-// sendEventSubscriptionConfirmation sends confirmation message
-func (fh *FeatureHandler) sendEventSubscriptionConfirmation(chat *tb.Chat, eventID string) error {
+// sendEventSubscriptionConfirmation sends the confirmation message
+func (fh *FeatureHandler) sendEventSubscriptionConfirmation(chat *tb.Chat, user *tb.User, eventID string) error {
+	lang := fh.getLangForUser(user)
+	msgs := i18n.Get().T(lang)
+
 	fh.eventsCacheMu.RLock()
 	var current *EventData
 	for i := range fh.eventsCache {
@@ -263,7 +351,7 @@ func (fh *FeatureHandler) sendEventSubscriptionConfirmation(chat *tb.Chat, event
 	}
 	fh.eventsCacheMu.RUnlock()
 	if current == nil {
-		_, err := fh.bot.Send(chat, "✅ Ты успешно подписался на событие.")
+		_, err := fh.bot.Send(chat, msgs.Events.Subscribed)
 		return err
 	}
 	timeInfo := ""
@@ -279,9 +367,9 @@ func (fh *FeatureHandler) sendEventSubscriptionConfirmation(chat *tb.Chat, event
 			timeInfo = fmt.Sprintf("%s %s", current.Day, monthName)
 		}
 	}
-	unsub := tb.InlineButton{Unique: "event_unsubscribe", Text: "Больше не интересно ❌", Data: fmt.Sprintf("unsub_%s", eventID)}
+	unsub := tb.InlineButton{Unique: "event_unsubscribe", Text: msgs.Buttons.Unsubscribe, Data: fmt.Sprintf("unsub_%s", eventID)}
 	markup := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{{unsub}}}
-	confirm := fmt.Sprintf("✅ Ты успешно подписался на событие.\n\nСобытие: %s\nВремя: %s\n\nЯ пришлю тебе напоминания за сутки и за 2 часа до начала.", current.Title, timeInfo)
+	confirm := fmt.Sprintf(msgs.Events.Subscribed, current.Title, timeInfo)
 	_, err := fh.bot.Send(chat, confirm, markup)
 	return err
 }
