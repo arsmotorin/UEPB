@@ -54,9 +54,6 @@ use_private = "Use /events in private messages with the bot to subscribe to even
 broadcast_reminder = "🔔 Event reminder in 5 days!\n\n📅 %s\n🕒 %s %s"
 broadcast_details = "\n\nDetails: /events in private messages with the bot"
 
-[filter]
-warning = "⚠️ %s, message deleted. A repeated violation will result in a ban."
-
 [admin]
 ban_command_admin_only = "ℹ The /banword command is only available to administrators."
 ban_usage = "ℹ Use: /banword word1 [word2 ...]"

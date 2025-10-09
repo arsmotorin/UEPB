@@ -249,7 +249,7 @@ func (fh *FeatureHandler) HandlePrevEvent(c tb.Context) error {
 	}
 	interested := tb.InlineButton{Unique: "event_interested", Text: msgs.Buttons.Interested, Data: fmt.Sprintf("int_%s", event.GetEventID())}
 	markup := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{navButtons, {interested}}}
-	_, err = fh.bot.Edit(c.Callback().Message, text, markup, tb.ModeMarkdown)
+	_, _ = fh.bot.Edit(c.Callback().Message, text, markup, tb.ModeMarkdown)
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
 
@@ -291,7 +291,7 @@ func (fh *FeatureHandler) HandleNextEvent(c tb.Context) error {
 	}
 	interested := tb.InlineButton{Unique: "event_interested", Text: msgs.Buttons.Interested, Data: fmt.Sprintf("int_%s", event.GetEventID())}
 	markup := &tb.ReplyMarkup{InlineKeyboard: [][]tb.InlineButton{navButtons, {interested}}}
-	_, err = fh.bot.Edit(c.Callback().Message, text, markup, tb.ModeMarkdown)
+	_, _ = fh.bot.Edit(c.Callback().Message, text, markup, tb.ModeMarkdown)
 	return fh.bot.Respond(c.Callback(), &tb.CallbackResponse{})
 }
 

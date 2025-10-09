@@ -284,6 +284,7 @@ func (ah *AdminHandler) ClearViolations(userID int64) {
 	ah.saveViolations()
 }
 
+// saveViolations persists violation count to disk
 func (ah *AdminHandler) saveViolations() {
 	data, err := json.MarshalIndent(ah.violations, "", "  ")
 	if err != nil {
@@ -292,6 +293,7 @@ func (ah *AdminHandler) saveViolations() {
 	_ = os.WriteFile(ah.violationsFile, data, 0644)
 }
 
+// loadViolations reads violation count from disk
 func (ah *AdminHandler) loadViolations() {
 	data, err := os.ReadFile(ah.violationsFile)
 	if err != nil {

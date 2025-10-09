@@ -54,9 +54,6 @@ use_private = "Użyj /events w prywatnych wiadomościach z botem, aby zapisać s
 broadcast_reminder = "🔔 Przypomnienie o wydarzeniu za 5 dni!\n\n📅 %s\n🕒 %s %s"
 broadcast_details = "\n\nSzczegóły: /events w prywatnych wiadomościach z botem"
 
-[filter]
-warning = "⚠️ %s, wiadomość została usunięta. Przy ponownym naruszeniu zostanie ban."
-
 [admin]
 ban_command_admin_only = "ℹ Komenda /banword jest dostępna tylko dla administracji."
 ban_usage = "ℹ Użyj: /banword słowo1 [słowo2 ...]"

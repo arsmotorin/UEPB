@@ -1,10 +1,8 @@
 package bot
 
 import (
-	"UEPB/internal/i18n"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/sirupsen/logrus"
 	tb "gopkg.in/telebot.v4"
@@ -40,9 +38,6 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 	}).Debug("Filtering message")
 
 	if fh.blacklist != nil && fh.blacklist.CheckMessage(msg.Text) {
-		lang := fh.getLangForUser(msg.Sender)
-		msgs := i18n.Get().T(lang)
-
 		// Record violation
 		if fh.adminHandler != nil {
 			fh.adminHandler.AddViolation(msg.Sender.ID)
@@ -85,15 +80,7 @@ func (fh *FeatureHandler) FilterMessage(c tb.Context) error {
 			return nil
 		}
 
-		// First violation -> ephemeral warning
-		displayName := msg.Sender.Username
 		if fh.adminHandler != nil {
-			displayName = fh.adminHandler.GetUserDisplayName(msg.Sender)
-		}
-		warningText := fmt.Sprintf(msgs.Filter.Warning, displayName)
-		warnMsg, _ := fh.bot.Send(c.Chat(), warningText)
-		if fh.adminHandler != nil {
-			fh.adminHandler.DeleteAfter(warnMsg, 5*time.Second)
 			logMsg := fmt.Sprintf("⚠️ Обнаружено нарушение.\n\nПользователь: %s\nНарушение: #%d\nСообщение: `%s`", fh.adminHandler.GetUserDisplayName(msg.Sender), violationCount, msg.Text)
 			fh.adminHandler.LogToAdmin(logMsg)
 		}

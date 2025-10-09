@@ -9,7 +9,7 @@ import (
 	tb "gopkg.in/telebot.v4"
 )
 
-// HandlePing replies with latency (private only).
+// HandlePing replies with latency
 func (fh *FeatureHandler) HandlePing(c tb.Context) error {
 	lang := fh.getLangForUser(c.Sender())
 	msgs := i18n.Get().T(lang)

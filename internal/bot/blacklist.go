@@ -27,6 +27,7 @@ func NewBlacklist(file string) BlacklistInterface {
 	return bl
 }
 
+// AddPhrase adds a phrase to the blacklist
 func (b *Blacklist) AddPhrase(words []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -38,6 +39,7 @@ func (b *Blacklist) AddPhrase(words []string) {
 	_ = b.save()
 }
 
+// RemovePhrase removes a phrase from the blacklist
 func (b *Blacklist) RemovePhrase(words []string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -56,6 +58,7 @@ func (b *Blacklist) RemovePhrase(words []string) bool {
 	return false
 }
 
+// CheckMessage checks if a message contains any blacklisted phrases
 func (b *Blacklist) CheckMessage(msg string) bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -84,12 +87,14 @@ func (b *Blacklist) CheckMessage(msg string) bool {
 	return false
 }
 
+// List returns a copy of the blacklisted phrases
 func (b *Blacklist) List() [][]string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return append([][]string(nil), b.Phrases...)
 }
 
+// save persists the blacklist to disk
 func (b *Blacklist) save() error {
 	data, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
@@ -101,6 +106,7 @@ func (b *Blacklist) save() error {
 	return nil
 }
 
+// load reads the blacklist from disk
 func (b *Blacklist) load() {
 	data, err := os.ReadFile(b.file)
 	if err != nil {
