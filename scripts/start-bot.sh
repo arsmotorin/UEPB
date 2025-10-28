@@ -19,7 +19,6 @@ fi
 
 mkdir -p logs data
 
-echo "Starting..."
 screen -dmS "$SESSION_NAME" bash -c "./uepb-bot 2>&1 | tee logs/bot-$(date +%Y%m%d-%H%M%S).log"
 
 sleep 1

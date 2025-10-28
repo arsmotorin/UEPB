@@ -104,27 +104,15 @@ func (h *Handler) Register() {
 	h.bot.Handle(&h.Btns.Student, h.featureHandler.OnlyNewbies(h.featureHandler.HandleStudent))
 	h.bot.Handle(&h.Btns.Guest, h.featureHandler.OnlyNewbies(h.featureHandler.HandleGuest))
 	h.bot.Handle(&h.Btns.Ads, h.featureHandler.OnlyNewbies(h.featureHandler.HandleAds))
-	prevEventBtn := tb.InlineButton{Unique: "prev_event"}
-	nextEventBtn := tb.InlineButton{Unique: "next_event"}
-	interestedBtn := tb.InlineButton{Unique: "event_interested"}
-	unsubscribeBtn := tb.InlineButton{Unique: "event_unsubscribe"}
-	broadcastInterestedBtn := tb.InlineButton{Unique: "broadcast_interested"}
-	h.bot.Handle(&prevEventBtn, h.featureHandler.HandlePrevEvent)
-	h.bot.Handle(&nextEventBtn, h.featureHandler.HandleNextEvent)
-	h.bot.Handle(&interestedBtn, h.featureHandler.HandleEventInterested)
-	h.bot.Handle(&unsubscribeBtn, h.featureHandler.HandleEventUnsubscribe)
-	h.bot.Handle(&broadcastInterestedBtn, h.featureHandler.HandleBroadcastInterested)
 	h.featureHandler.RegisterQuizHandlers(h.bot)
 	h.bot.Handle("/banword", h.adminHandler.HandleBan)
 	h.bot.Handle("/unbanword", h.adminHandler.HandleUnban)
 	h.bot.Handle("/listbanword", h.adminHandler.HandleListBan)
 	h.bot.Handle("/spamban", h.adminHandler.HandleSpamBan)
 	h.bot.Handle("/ping", h.featureHandler.RateLimit(h.featureHandler.HandlePing))
-	h.bot.Handle("/events", h.featureHandler.HandleEvent)
 	h.bot.Handle("/start", h.featureHandler.HandleStart)
 	h.bot.Handle(tb.OnText, h.handleTextMessage)
 	h.setBotCommands()
-	h.featureHandler.StartEventBroadcaster()
 }
 
 // handleTextMessage handles text messages
@@ -152,7 +140,6 @@ func (h *Handler) setBotCommands() {
 	for langCode, lang := range languageMapping {
 		msgs := i18n.Get().T(lang)
 		commands := []tb.Command{
-			{Text: "events", Description: msgs.Commands.EventsDesc},
 			{Text: "ping", Description: msgs.Commands.PingDesc},
 			{Text: "banword", Description: msgs.Commands.BanwordDesc},
 			{Text: "unbanword", Description: msgs.Commands.UnbanwordDesc},
@@ -166,7 +153,6 @@ func (h *Handler) setBotCommands() {
 	// Set default commands
 	msgsPL := i18n.Get().T(i18n.PL)
 	commandsDefault := []tb.Command{
-		{Text: "events", Description: msgsPL.Commands.EventsDesc},
 		{Text: "ping", Description: msgsPL.Commands.PingDesc},
 		{Text: "banword", Description: msgsPL.Commands.BanwordDesc},
 		{Text: "unbanword", Description: msgsPL.Commands.UnbanwordDesc},

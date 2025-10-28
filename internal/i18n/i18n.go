@@ -31,10 +31,6 @@ type Messages struct {
 		Student       string `toml:"student"`
 		Guest         string `toml:"guest"`
 		Ads           string `toml:"ads"`
-		Next          string `toml:"next"`
-		Prev          string `toml:"prev"`
-		Interested    string `toml:"interested"`
-		Unsubscribe   string `toml:"unsubscribe"`
 		NotYourButton string `toml:"not_your_button"`
 	} `toml:"buttons"`
 	Quiz struct {
@@ -58,26 +54,6 @@ type Messages struct {
 	RateLimit struct {
 		TooFast string `toml:"too_fast"`
 	} `toml:"ratelimit"`
-	Events struct {
-		Loading              string `toml:"loading"`
-		ErrorLoading         string `toml:"error_loading"`
-		NoEvents             string `toml:"no_events"`
-		PrivateOnly          string `toml:"private_only"`
-		RateLimit            string `toml:"rate_limit"`
-		FirstEvent           string `toml:"first_event"`
-		LastEvent            string `toml:"last_event"`
-		EventNumber          string `toml:"event_number"`
-		WillHappen           string `toml:"will_happen"`
-		WillHappenNoTime     string `toml:"will_happen_no_time"`
-		Subscribed           string `toml:"subscribed"`
-		AlreadySubscribed    string `toml:"already_subscribed"`
-		NotSubscribed        string `toml:"not_subscribed"`
-		Unsubscribed         string `toml:"unsubscribed"`
-		UnsubscribedCallback string `toml:"unsubscribed_callback"`
-		UsePrivate           string `toml:"use_private"`
-		BroadcastReminder    string `toml:"broadcast_reminder"`
-		BroadcastDetails     string `toml:"broadcast_details"`
-	} `toml:"events"`
 	Filter struct {
 		Warning string `toml:"warning"`
 	} `toml:"filter"`
@@ -101,7 +77,6 @@ type Messages struct {
 		Greeting string `toml:"greeting"`
 	} `toml:"start"`
 	Commands struct {
-		EventsDesc      string `toml:"events_desc"`
 		PingDesc        string `toml:"ping_desc"`
 		BanwordDesc     string `toml:"banword_desc"`
 		UnbanwordDesc   string `toml:"unbanword_desc"`
